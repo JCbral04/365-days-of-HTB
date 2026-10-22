@@ -1,0 +1,6 @@
+# Obsidian (estado local, no contenido)
+.obsidian/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
