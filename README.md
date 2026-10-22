@@ -44,4 +44,4 @@ Machines/              ← write-ups de máquinas (retiradas / Starting Point)
 Todo el contenido es educativo y se practica exclusivamente en entornos autorizados (HTB Academy, TryHackMe, laboratorios propios). Nada de lo documentado aquí aplica a sistemas sin permiso explícito.
 
 ---
-*Software engineering student (7th semester) learning offensive security. Also building things in .NET, React and Python.*
+*Software engineering student (7th semester) learning offensive security.*
