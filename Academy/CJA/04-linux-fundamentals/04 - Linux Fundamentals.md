@@ -1,0 +1,130 @@
+>[!NOTE]- Módulo en progreso (5/8 secciones de Workflow). Notas de lo completado.
+
+## 1. Introducción
+
+### Estructura de Linux
+
+- Todo es un **árbol que nace en** **`**/**`** (raíz) — no hay unidades tipo C:\
+- Estructura estándar (FHS): `/home` usuarios · `/etc` configuración · `/var` datos variables (logs, mail) · `/root` home del admin · `/bin`, `/sbin` binarios
+- Ruta mental del descubrimiento: `find` por nombre → convenciones FHS → config en `/etc` → `man`
+```mermaid
+flowchart TB
+    ROOT["/ (raíz)"]:::root
+
+    subgraph CORE["Sistema"]
+        direction LR
+        BIN["/bin"]
+        BOOT["/boot"]
+        DEV["/dev"]
+        LIB["/lib"]
+    end
+
+    subgraph DATA["Datos (donde miro)"]
+        direction LR
+        ETC["/etc"]
+        VAR["/var"]
+        HOME["/home"]
+        ROO["/root"]
+        TMP["/tmp"]
+    end
+
+    subgraph VIRT["Virtuales (del kernel)"]
+        direction LR
+        PROC["/proc"]
+        SYS["/sys"]
+        RUN["/run"]
+    end
+
+    subgraph EXT["Montaje y software"]
+        direction LR
+        MNT["/mnt"]
+        MEDIA["/media"]
+        OPT["/opt"]
+        USR["/usr"]
+    end
+
+    ROOT --> CORE
+    ROOT --> DATA
+    ROOT --> VIRT
+    ROOT --> EXT
+
+    style ROOT fill:#1e1e2e,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4
+    style ETC fill:#1e1e2e,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4
+    style VAR fill:#1e1e2e,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4
+    style HOME fill:#1e1e2e,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4
+    style ROO fill:#1e1e2e,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4
+```
+
+### Distribuciones
+
+- Familias: **Debian/Ubuntu** (Kali, Parrot, Pwnbox) · **RHEL** (CentOS, Fedora) · **Arch**
+- Todas comparten el kernel Linux; difieren en gestor de paquetes y filosofía
+
+### El shell
+
+- Shell = intérprete de comandos (bash es el estándar)
+- Terminal ≠ shell ≠ consola: la terminal es la ventana, el shell es el programa que habla
+- El prompt: `usuario@host:~$` — el `$` = usuario normal, `#` = **root** (¡ese símbolo es una alarma de cuidado!)
+
+## 2. The Shell
+
+### Prompt
+
+- `usuario@maquina:ruta$` — leerlo antes de ejecutar algo me dice QUIÉN y DÓNDE soy
+
+### Getting Help
+
+- `man <comando>` — manual completo (q salir, / buscar dentro)
+- `<comando> --help` — resumen rápido
+- La ayuda está en el sistema: no necesito internet para aprender un comando
+
+### System Information (lo que usé en mi sesión SSH)
+
+|Comando|Me dio|
+|---|---|
+|`uname -r`|versión del kernel (4.15.0)|
+|`id`|uid, gid, grupos|
+|`whoami`|htb-student|
+|`ps`|mis procesos (con TTY y PID)|
+
+## 3. Workflow (5/8)
+
+### Navegación
+
+- `pwd`, `ls -la` (ocultos incluidos), `cd` (~ home · - anterior · .. subir)
+- `ls -la` en `/home` me reveló otros usuarios: cry0l1t3, mrb3n → eso ES reconocimiento
+
+### Archivos y directorios
+
+- touch, mkdir, cp, mv, rm (sin papelera), `file` (el tipo real, no la extensión)
+
+### Edición
+
+- nano (Ctrl+O / Ctrl+X) · vim (i / Esc / :wq / :q!)
+- En servidores remotos a menudo solo hay vim: saber los 4 comandos básicos = sobrevivir
+
+### Búsqueda (find)
+
+- `find / -name X 2>/dev/null` — el 2>/dev/null oculta "Permission denied" de carpetas ajenas
+- `-type f|d`, `-size`, `-perm` (¡-4000 SUID = oro en escalada!), `-user`
+- `which <comando>` — dónde está un binario
+
+### Descriptores y redirección
+
+- stdin=0, stdout=1, stderr=2
+- `>` sobrescribe · `>>` agrega · `2>` errores · `2>&1` junta todo · `<` entrada · `|` pipe · `tee` (pantalla + archivo) · `/dev/null` (agujero negro)
+
+## Lo que viví en la sesión (no está en el módulo, pero importa)
+
+- `/etc/passwd` legible por todos: `usuario:x:UID:GID:desc:home:SHELL`
+- el `x` = la pass real vive en `/etc/shadow` (cifrada, solo root)
+- cuentas de servicio con `/usr/sbin/nologin`: existen para servicios, nadie loguea con ellas
+- El mail de un usuario vive en `/var/mail/<usuario>` (del sistema, no del home) — y el archivo solo existe si llegó correo
+- `cat root` en /var/mail → ****Permission denied****: los spools de mail son privados (Unix protegiendo datos)
+- Errores que me enseñaron: cat en directorio ("Is a directory"), pegar la contraseña en el comando ssh en vez del prompt, `exit` no existe en netcat
+
+## Pendiente
+
+- Filter Contents
+- Regular Expressions
+- (sección 8 de Workflow)
