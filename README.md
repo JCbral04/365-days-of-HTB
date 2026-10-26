@@ -28,7 +28,6 @@ Documento mi proceso de aprendizaje en ciberseguridad de forma pública: qué es
 | ... | ⬜ |
 
 **Path general: 22.3% completado**
->>>>>>> cbd5919 (Actualizo mi progreso local en el README)
 
 ## Estructura
 ```
