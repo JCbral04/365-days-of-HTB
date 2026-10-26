@@ -87,7 +87,7 @@ flowchart TB
 |`whoami`|htb-student|
 |`ps`|mis procesos (con TTY y PID)|
 
-## 3. Workflow (5/8)
+## 3. Workflow (6/8)
 
 ### Navegación
 
@@ -114,6 +114,28 @@ flowchart TB
 - stdin=0, stdout=1, stderr=2
 - `>` sobrescribe · `>>` agrega · `2>` errores · `2>&1` junta todo · `<` entrada · `|` pipe · `tee` (pantalla + archivo) · `/dev/null` (agujero negro)
 
+### Filter Contents(completada 2026-10-25)
+El pipeline de 4 verbos que me llevó toda una tarde entender:
+
+|Verbo|Comando|Hace|
+|---|---|---|
+|extraer|`grep -o`|imprime SOLO el match, no la línea|
+|excluir|`grep -v`|invierte: quita lo que coincide|
+|regex extendida|`grep -E`|habilita `?`, `+`, `()` sin escapar|
+|deduplicar|`sort -u`|ordena y quita repetidos|
+|contar|`wc -l`|cuenta líneas|
+
+**Patrones que aprendí destripando comandos:**
+
+- `https?://` → la `s` es opcional (0 o 1 vez)
+- `[^"[:space:]<>]+` → "cualquier cosa que NO sea comilla, espacio, `<` o `>`" — `[:space:]` es clase POSIX = todo whitespace
+- `^...$` → anclas inicio y fin de línea (coincidencia exacta)
+- `X?` → X opcional
+- `\.` → punto literal (sin escape, `.` = cualquier carácter)
+- `sed 's|viejo|nuevo|'` → reemplaza texto
+
+**El patrón mental clave:** `extraer (grep -o) → transformar (sed) → deduplicar (sort -u) → contar (wc -l)`. Casi todo análisis de texto en HTB es esa cadena.
+
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 
 - `/etc/passwd` legible por todos: `usuario:x:UID:GID:desc:home:SHELL`
@@ -123,8 +145,12 @@ flowchart TB
 - `cat root` en /var/mail → ****Permission denied****: los spools de mail son privados (Unix protegiendo datos)
 - Errores que me enseñaron: cat en directorio ("Is a directory"), pegar la contraseña en el comando ssh en vez del prompt, `exit` no existe en netcat
 
+### Batallas de hoy (2026-10-25) — errores que fueron lecciones
+- **El** **`**127.0.0.53**`** **fantasma:** al contar "servicios escuchando en todas las interfaces" excluí solo `127.0.0.1` — y el DNS stub de systemd-resolved (`127.0.0.53%lo:53`) se coló en mi cuenta. Lección: **filtrar por la definición** (loopback = `127.0.0.0/8` entero, `grep -v '127\.'`), no por el ejemplo que conocía.
+- **`**ps**`** **vs** **`**ps aux**`** **:** busqué el usuario de ProFTPd con `ps -la` y solo veía mis procesos. Sin la `x` no ves daemons (no tienen TTY). `ps aux | grep X` = "¿quién corre X y como quién?" → respuesta: `proftpd`, su propio usuario dedicado (buena práctica de drop privileges).
+- **Estres con el 34:** contar los paths únicos de inlanefreight.com me tomó 5 intentos (10 → 20 → 35 → 34). Lo que fallaba cada vez era la __definición del set__: ¿cuentan hrefs completos o paths? ¿la raíz `/` es un path? (el grader dijo que no). Lección: cuando un grader te rechaza, volcar la lista intermedia (`sort -u > /tmp/x.txt`) y auditarla línea por línea es más rápido que googlear.
+
 ## Pendiente
 
-- Filter Contents
 - Regular Expressions
 - (sección 8 de Workflow)
