@@ -23,7 +23,6 @@ Documento mi proceso de aprendizaje en ciberseguridad de forma pública: qué es
 
 **Path general: 22.3% completado**
 
-=======
 | Linux Fundamentals | 🔵 en progreso (46.67%) |
 | Introduction to Bash Scripting | ⬜ |
 | ... | ⬜ |

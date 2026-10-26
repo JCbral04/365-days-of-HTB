@@ -87,7 +87,7 @@ flowchart TB
 |`whoami`|htb-student|
 |`ps`|mis procesos (con TTY y PID)|
 
-## 3. Workflow (6/8)
+## 3. Workflow (8/8)
 
 ### Navegación
 
@@ -135,6 +135,98 @@ El pipeline de 4 verbos que me llevó toda una tarde entender:
 - `sed 's|viejo|nuevo|'` → reemplaza texto
 
 **El patrón mental clave:** `extraer (grep -o) → transformar (sed) → deduplicar (sort -u) → contar (wc -l)`. Casi todo análisis de texto en HTB es esa cadena.
+
+### Expresiones regulares(RegEx)
+
+> RegEx = planos de busqueda de patrones de texto.  No busca texto literal, busca
+> **Estructura**: "una palabra que empiece con X", "3 digitos seguidos de una letra". Vive en `grep`, `sed`, `awk` y casi todos los lenguajes.
+
+**Meta caracteres de agrupacion:**
+
+| Operador | Nombre | Que hace? |
+|----------|--------|-----------|
+| `(a)` | grupo | agrupa patrones para procesarlos juntos |
+| `[a-z]` | clase de caracteres | Lista de caracteres basicos en esa posicion |
+| `{1, 10}` | cuantificador | repite el patrón de busqueda `N` veces (como un rango) |
+| `a\|b` | operador `OR` | coincide si aparecen a `O` b |
+| `a.*b` | operador `AND` | coincide si aparecen a `Y` b |
+
+**Ejemplos**
+
+```bash
+# OR: líneas con "my" O "false"
+grep -E "(my|false)" /etc/passwd
+
+# AND: líneas con "my" Y "false" (en ese orden)
+grep -E "(my.*false)" /etc/passwd
+
+# AND equivalente con dos greps encadenados
+grep -E "my" /etc/passwd | grep -E "false"
+```
+
+### Manejo de Permisos
+
+> Permisos = llaves. Cada archivo/directorio tiene **dueño (user)** y **grupo**, y para cada uno se definen r/w/x. El usuario puede pertenecer a varios grupos y hereda sus derechos.
+
+**La tríada rwx (y el octal detrás):**
+
+| Permiso | Letra | Valor |
+|---|---|---|
+| Read | r | 4 |
+| Write | w | 2 |
+| Execute | x | 1 |
+
+`chmod 754 shell` → `7`=rwx (dueño), `5`=r-x (grupo), `4`=r-- (otros). Octal = suma de bits (111=7, 101=5, 100=4).
+
+```bash
+`usuario@linux[/linux]$ ls -l /etc/passwd 
+
+- rwx rw- r--   1 root root 1641 May   4 23:42 /etc/passwd
+- --- --- ---   |  |    |    |   |__________| |
+
+| |   |   |     |  |    |    |        |_ Fecha
+| |   |   |     |  |    |    |__________ Tamaño del archivo
+| |   |   |     |  |    |_______________ Grupo
+| |   |   |     |  |____________________ Usuario
+| |   |   |     |_______________________ Número de enlaces duros
+| |   |   |_ Permisos de otros (lectura)
+| |   |_____ Permisos del grupo (lectura, escritura)
+| |_________ Permisos del propietario (lectura, escritura, ejecución)
+|____________ Tipo de archivo (- = Archivo, d = Directorio, l = Enlace, ... )
+```
+
+**Sintaxis simbólica de chmod:**
+```bash
+chmod u+x script.sh   # dueño: +ejecutar
+chmod g-w archivo     # grupo: -escribir
+chmod a+r shell       # todos: +leer   (u=owner, g=group, o=others, a=all)
+chmod 754 shell       # equivalente octal
+```
+**Dueño y grupo:**
+```bash
+chown root:root shell    # cambia user y grupo a la vez
+```
+**Regla de oro que el módulo subraya:**
+
+>[!NOTE] **Execute en un DIRECTORIO ≠ ejecutar archivos.** Es permiso para 
+>**atravesar** el directorio. Sin x en el directorio: "Permission denied" aunque tengas `r`
+> sobre el contenido. Para crear/borrar/renombrar dentro: necesitas **`w` sobre el 
+> directorio**.
+
+**Permisos especiales (el oro del pentester):**
+
+|Bit|En `ls -l`|Efecto|Riesgo|
+|:--|:--|:--|:--|
+|**SUID** (4000)|`-rwsr-xr-x`|el binario corre como SU DUEÑO (¿root?)|si el programa puede lanzar shell → root directo(escalar privilegios)|
+|**SGID** (2000)|`-rwxr-sr-x`|corre como su GRUPO|idem con grupos privilegiados|
+|**Sticky** (1000)|`drwxrwxrwt`|en directorio compartido: solo el dueño del archivo puede borrarlo|defensa, no ataque|
+- SUID/SGID son "pases temporales de acceso": útiles para tareas del sistema, letales si el admin los pone indiscriminadamente (ej: SUID en `journalctl` → shell como root)
+    
+- **`t` minúscula** = sticky + execute presente · **`T` mayúscula** = sticky SIN execute (nadie atraviesa ni ejecuta ahí)
+    
+- Referencia de binarios abusables: [**GTFObins**](gtfobins.github.io)
+
+## Manejo del sistema 
 
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 
