@@ -5,7 +5,7 @@
 > 
 **Día actual: 4 / 365** 
 
-![Progress](https://img.shields.io/badge/CJA%20path-21.4%25-brightgreen)
+![Progress](https://img.shields.io/badge/CJA%20path-21.7%25-brightgreen)
 
 ## ¿Por qué existe este repo?
 
