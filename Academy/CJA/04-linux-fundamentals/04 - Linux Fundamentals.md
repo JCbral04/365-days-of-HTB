@@ -226,7 +226,207 @@ chown root:root shell    # cambia user y grupo a la vez
     
 - Referencia de binarios abusables: [**GTFObins**](gtfobins.github.io)
 
-## Manejo del sistema 
+## 4. Manejo del sistema (System Management 4/9)
+
+### Manejo de Usuarios
+
+> Admin de usuarios = asignar llaves. Crear cuentas, meterlas en grupos con acceso a recursos, y ejecutar comandos como otro usuario cuando la tarea lo pide.
+
+**Elevación de privilegios:**
+
+| Comando | Qué hace |
+|---|---|
+| `sudo <cmd>` | ejecuta UN comando como otro usuario (default: root) |
+| `su [-] [user]` | cambia DE USUARIO completo (abre shell; `-` = login shell con su entorno; sin user = root) |
+| `sudo -i` / `sudo su` | sesión root completa (mismo efecto práctico) |
+
+
+**Gestión de cuentas:**
+
+| Comando | Qué hace |
+|---|---|
+| `useradd -m -s /bin/bash alex` | crea usuario (con home y shell) |
+| `userdel -r alex` | borra usuario y su home |
+| `usermod -aG developers alex` | agrega usuario a grupo (`-a` = append, sin él REEMPLAZA los grupos ⚠️) |
+| `addgroup developers` / `delgroup` | crear/eliminar grupos |
+| `passwd alex` | cambiar contraseña (root la cambia sin saber la vieja) |
+
+**El ejemplo del módulo (y su lectura ofensiva):**
+```bash
+cat /etc/shadow          # Permission denied (solo root)
+sudo cat /etc/shadow     # Nos deja tods hashes a la vista
+```
+
+### Manejo de paquetes
+
+> Repaso: Ya conozco conceptos de esta seccion pero anotar por si se me olvida :D.
+
+**Lo que ya sabía (repaso):**
+- Qué es un paquete: archivo con binarios, configuraciones, metadatos de dependencias, control de updates
+- Qué hace un package manager: descargar, resolver dependencias, instalar/eliminar, calidad/estándares etc...
+- `apt` = front-end de alto nivel para Debian (el "npm/apt de sistema"); resuelve dependencias automáticamente descargándolas del repo
+- `apt install <pkg> -y` · `apt remove` · `apt update && apt full-upgrade` (mi alias `update`)
+- `git clone <url> ~/carpeta` → bajar tools desde GitHub (flujo clásico de HTB; ejemplo del módulo: Nishang de samratashok)
+- `pip` (Python) y `gem` (Ruby) = package managers de ecosistemas de lenguaje (regla mental: igual que npm, pero para el runtime, no el SO)
+- Repos: distribuciones mantienen repos centralizados, etiquetados stable/testing/unstable; el sistema consulta ahí al instalar/actualizar
+- `apt list --installed` → inventario de paquetes instalados
+
+**Lo que NO sabía / no tenía claro:**
+- `dpkg` = la herramienta de BAJO nivel: instala .deb sueltos pero **NO resuelve dependencias** — si falta algo, `sudo dpkg -i tool.deb` falla o deja el sistema roto hasta `sudo apt -f install` (fix broken)
+- Flujo completo de .deb a mano (ejemplo del módulo con strace):
+```bash
+wget http://.../strace_4.21-1ubuntu1_amd64.deb    # 1. descargar el .deb
+sudo dpkg -i strace_4.21-1ubuntu1_amd64.deb       # 2. instalarlo
+strace -h                                          # 3. probarlo
+```
+
+### Servicios y manejo de procesos
+
+Servicios, conocidos en linux cotidianamente como `daemons` son componentes fundamentales en linux que corren en segundo plano y son esenciales para mantener el SO funcionando correctamente tanto como para habilitar funciones especificas que necesite el usuario.
+
+Podriamos decir que exiten dos tipos, los de **sistema** ( que arrancan con el SO, hardware/init, Ej: como el motor de  un carro) y los de **usuario** (apps servidor instaladas después, Ej: como el aire acondicionado). El "d" final del nombre lo delata: `sshd`, `systemd`.
+
+**Lo que ya saba (repaso):**
+- `systemctl start|stop|restart|status <svc>` — control básico (me sonaba de Docker como levantar o bajar contenedores)
+- `ps aux | grep X` — encontrar procesos (ya lo usé con ProFTPd)
+- `kill <PID>` básico
+- `;` separa comandos sin importar errores · `&&` encadena (lo uso en git) · `|` pipe (mi herramienta favorita ya que es lo mas practico )
+
+**Lo que no sabía, un refuerzo importante:**
+- `systemctl enable <svc>` / `disable` : arrancar o no  **en el boot**. `enable ≠ start`: enable marca para el arranque, start lo corre ahora. (Pentest: `systemctl enable backdoor` = persistencia en el objetivo)
+- `systemctl list-units --type=service`: listar todos los servicios (crucial para hacer reconocimiento de X o Y sistema)
+- `journalctl -u <svc> --no-pager`: logs del servicio. MISMO instinto que mi saga del boot: cuando algo no arranca, su log dice por qué.
+- Estructura: PID (cada proceso), PPID (padre → procesos hijos), `/proc/<PID>/` (info en vivo)
+- **Señales (la tabla que valía la pena):**
+
+| Señal       | #   | Cuándo                                       |
+| ----------- | --- | -------------------------------------------- |
+| SIGHUP      | 1   | la terminal controladora se cerró            |
+| SIGINT      | 2   | Ctrl+C (interrumpir)                         |
+| SIGQUIT     | 3   | Ctrl+D                                       |
+| **SIGKILL** | 9   | matar YA, sin limpieza (procesos congelados) |
+| SIGTERM     | 15  | terminación amable (default de `kill`)       |
+| SIGSTOP     | 19  | congelar, no manejable                       |
+| SIGTSTP     | 20  | Ctrl+Z (suspender, sí manejable)             |
+
+- **Job control (flujo completo):** `Ctrl+Z` suspende (no mata) → `jobs` lista → `bg` lo manda a background corriendo → `fg <id>` lo trae al frente · `comando &` = directo a background desde el inicio
+- `pkill -f <nombre>` / `killall <nombre>` / `pgrep <nombre>` → matar/buscar por nombre sin buscar el PID
+- Zombie: proceso muerto que sigue en la tabla (hijo que nadie recogió)
+- `&&` exacto: si un comando FALLA, los siguientes no corren (`a && b` = b solo si a salió bien). `;` sigue siempre
+
+** Typeo del módulo incorrecto:** el ejemplo dice `kill 9 <PID>` — la forma estándar y portable suele ser  **`kill -9 <PID>`** (con guión). Confiando pero verificando, también el material oficial.
+
+**La conexión con mi lab de FTP:** aquel día me toco usar 2 terminales (una de control y una de datos). Con job control lo hago en 1: lanzo `nc <ip> <puerto>`, `Ctrl+Z`, `bg`, abro lo demás, y `fg` cuando lo necesite. Mismo principio para un listener de netcat corriendo en background mientras exploto.
+
+### Programacion de tareas
+
+
+**¿Qué es la programación de tareas?**
+
+Es la como decirle al sistema "ejecuta esto, solo, sin que yo lo dispare, a esta hora o este dia o cada tanto". Como la cafetera programable: la configuras una vez y cada mañana hay café sin que toques nada. En Linux sirve para actualizaciones automáticas, backups, mantenimiento de bases de datos, scripts periódicos, cualquier tarea repetitiva que debe ocurrir con confiabilidad.
+
+**Por qué importa en ciberseguridad?:** yo lo definiria como una herramienta legítima de administración que  a su vez es un vector de ataque al mismo tiempo. Un atacante puede esconder tareas programadas que ejecutan scripts maliciosos o mantienen una puerta trasera viva a intervalos. Saber cómo funciona = saber auditarlo (detectar cron jobs sospechosos) y saber usarlo (persistencia en un sistema comprometido).
+
+En Linux hay 2 sistemas para esto: **systemd timers** (el moderno) y **cron** (el clásico).
+
+---
+
+#### Systemd Timers (el método moderno)
+
+Cuatro piezas que trabajan juntas:
+
+**1. Crear el timer** (el "cuándo") — `/etc/systemd/system/mytimer.timer`:
+```ini
+[Unit]
+Description=My Timer
+
+[Timer]
+OnBootSec=3min          # corre 3 minutos después del boot
+OnUnitActiveSec=1hour   # y luego cada hora
+
+[Install]
+WantedBy=timers.target
+```
+
+- `OnBootSec` → ejecuta UNA vez X tiempo después de encender.
+- `OnUnitActiveSec` → ejecuta cada vez que pasa X intervalo (repetición).
+
+**2. Crear el service** (el "qué") — `/etc/systemd/system/mytimer.service`:
+```ini
+[Unit]
+Description=My Service
+
+[Service]
+ExecStart=/ruta/completa/al/script.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+
+- `multi-user.target` = el estado normal del sistema multiusuario (el "modo estándar de arranque").
+- 
+**3. Recargar systemd** (paso que todos olvidamos jeje) :
+```bash
+sudo systemctl daemon-reload
+```
+
+Si no hacemos esto, systemd simplemente no "ve" los archivos nuevos que acabas de crear. No da error: simplemente ignora tus timers. 
+
+**4. Activar:**
+```bash
+sudo systemctl start mytimer.timer    # arrancarlo ahora
+sudo systemctl enable mytimer.timer   # que sobreviva al reboot
+```
+
+#### Cron (el método clásico)
+
+Un solo archivo (el **crontab**) con 5 columnas de tiempo + el comando:
+
+```plain
+┌───────── minuto (0-59)
+│ ┌─────── hora (0-23)
+│ │ ┌───── día del mes (1-31)
+│ │ │ ┌─── mes (1-12)
+│ │ │ │ ┌─ día de la semana (0-7, donde 0 Y 7 = domingo)
+│ │ │ │ │
+* * * * *  /ruta/al/comando.sh
+```
+
+Reglas de los valores:
+- `*` = "todos los valores posibles"
+- `*/N` = "cada N" (ej: `*/6` en horas = cada 6 horas)
+- número exacto = "solo ese"
+Ejemplos del módulo, desglosados:
+
+```cron
+0 */6 * * *   /scripts/update.sh     # minuto 0, cada 6 horas → 4 veces al día
+0 0 1 * *     /scripts/monthly.sh    # 00:00 del día 1 de cada mes
+0 0 * * 0     /scripts/sunday.sh     # 00:00 cada domingo
+0 0 * * 7     /scripts/also-sun.sh   # idem (7 también es domingo)
+```
+Comandos para manejar mi crontab:
+```bash
+crontab -e    # editar (crea el archivo si no existe)
+crontab -l    # listar MIS tareas programadas
+```
+
+Las tareas del sistema viven aparte: `/etc/crontab`, `/etc/cron.d/`, `/etc/cron.daily/`...
+
+#### Systemd vs Cron — la diferencia en una frase
+
+> Cron, yo lo llamaria como un archivo de texto que dice cuándo correr cosas. Systemd timer es mas como 2 archivos (el **"timer"** para el "cuándo" y el **"service"** para el "qué") más una activación explícita. Cron es más simple; systemd es más flexible (dependencias, logs vía journalctl, eventos etc..).
+
+#### El ángulo seguridad (por qué esta sección existe en un curso de hacking?)
+
+- **Persistencia del atacante:** Muchas veces el objetivo que tiene un hacker o cracker es mantener acceso al sistema que vulnero entonces una tarea programada hace que el acceso resucite solo. Ejemplo clásico: reverse shell que se reconecta cada 5 minutos:
+```bash
+crontab -l                          # tareas del usuario actual
+ls -la /etc/cron*                   # TODO lo programado del sistema
+cat /etc/crontab
+grep -rE "curl|wget|nc|bash -i" /etc/cron*   # ¿algo descarga y ejecuta?
+```
+- En máquinas de HTB es un patrón clásico: un cron corre como root un script que cualquiera puede escribir luego editas el script, esperas el minuto y bum eres root.
+
 
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 
@@ -238,11 +438,8 @@ chown root:root shell    # cambia user y grupo a la vez
 - Errores que me enseñaron: cat en directorio ("Is a directory"), pegar la contraseña en el comando ssh en vez del prompt, `exit` no existe en netcat
 
 ### Batallas de hoy (2026-10-25) — errores que fueron lecciones
-- **El** **`**127.0.0.53**`** **fantasma:** al contar "servicios escuchando en todas las interfaces" excluí solo `127.0.0.1` — y el DNS stub de systemd-resolved (`127.0.0.53%lo:53`) se coló en mi cuenta. Lección: **filtrar por la definición** (loopback = `127.0.0.0/8` entero, `grep -v '127\.'`), no por el ejemplo que conocía.
-- **`**ps**`** **vs** **`**ps aux**`** **:** busqué el usuario de ProFTPd con `ps -la` y solo veía mis procesos. Sin la `x` no ves daemons (no tienen TTY). `ps aux | grep X` = "¿quién corre X y como quién?" → respuesta: `proftpd`, su propio usuario dedicado (buena práctica de drop privileges).
+- **El** **`**127.0.0.53**`** **fantasma:** al contar "servicios escuchando en todas las interfaces" excluí solo `127.0.0.1` — y el DNS stub de systemd-resolved (`127.0.0.53%lo:53`) se coló en mi cuenta. 
+- Lección: **filtrar por la definición** (loopback = `127.0.0.0/8` entero, `grep -v '127\.'`), no por el ejemplo que conocía.
+- **`**ps**`** **vs** **`**ps aux**`** **:** busqué el usuario de ProFTPd con `ps -la` y solo veía mis procesos. Sin la `x` no ves daemons (no tienen TTY). `ps aux | grep X` = "¿quién corre proceso X y como quién?" → respuesta: `proftpd`, su propio usuario dedicado (buena práctica de drop privileges).
 - **Estres con el 34:** contar los paths únicos de inlanefreight.com me tomó 5 intentos (10 → 20 → 35 → 34). Lo que fallaba cada vez era la __definición del set__: ¿cuentan hrefs completos o paths? ¿la raíz `/` es un path? (el grader dijo que no). Lección: cuando un grader te rechaza, volcar la lista intermedia (`sort -u > /tmp/x.txt`) y auditarla línea por línea es más rápido que googlear.
 
-## Pendiente
-
-- Regular Expressions
-- (sección 8 de Workflow)
