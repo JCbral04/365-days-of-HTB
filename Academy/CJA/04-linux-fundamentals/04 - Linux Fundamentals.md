@@ -455,6 +455,44 @@ grep -rE "curl|wget|nc|bash -i" /etc/cron*   # ¿algo descarga y ejecuta?
 
 ### Backup y restauracion
 
+**Lo que ya sabía (repaso):**
+- Conceptos de backup: full vs incremental, por qué transferir solo lo cambiado es eficiente (mismo principio que git con los deltas)
+- SSH con llaves: `ssh-keygen` + copiar la pública al servidor = login sin password (ya lo uso con GitHub)
+- Cron para automatizar (sección anterior)
+- Cifrado de respaldos como idea (y LUKS ya lo viví con mi USB cifrada)
+
+**Lo que NO sabía / refuerzo:**
+- **`rsync` es EL tool de backup en Linux**, y sus flags:
+```bash
+rsync -av /origen/ user@server:/destino/     # -a = archive (preserva permisos, timestamps, owners) · -v = verbose
+rsync -avz origen/ destino/                 # -z = compresión en tránsito
+rsync -av --delete origen/ destino/           # --delete = borra en destino lo que ya no existe en origen (espejo exacto)
+rsync -avz -e ssh origen/ user@server:/destino/   # por SSH (cifrado en tránsito)
+```
+- **Las tres opciones del ecosistema:**
+    - **rsync** → transferencias delta (solo lo que cambió), local o remoto
+    - **duplicity** → rsync + **cifrado del backup** (sirve para respaldar en servidores/cloud no confiables: S3, FTP ajeno)
+    - **deja dup** → GUI amigable (para gente que no quiere terminal)    
+    - cifrado extra posible con GnuPG, eCryptfs o LUKS
+        
+- **El patrón auto-sync** (conecta TRES secciones en una): script con rsync + SSH sin password (key-based) + cron:
+
+```bash
+ssh-keygen -t rsa -b 2048          # 1. llave sin passphrase (para automatizar)
+ssh-copy-id user@backup_server     # 2. instalar la pública en el destino
+# 3. script con el rsync + chmod +x
+# 4. crontab: 0 * * * * /ruta/RSYNC_Backup.sh
+```
+
+El detalle clave: **la llave sin passphrase** — necesaria para que cron corra solo sin humano que escriba password. (Trade-off de seguridad que ya conoces: llave sin passphrase = quien robe tu llave entra sin fricción. Mi backup del header LUKS tiene el mismo dilema guardado en el portátil.)
+
+**El ángulo pentest:**
+
+- **Exfiltración:** rsync es una herramienta clásica de exfiltración en máquinas comprometidas — un atacante con acceso puede `rsync` tus datos a su servidor tan eficientemente como un admin hace backups. ¿Por qué importa? Porque detectar rsync inusual en un host (procesos, conexiones salientes) es una señal de SOC.
+    
+- **Recon:** los backups son un desastre de seguridad cuando se hacen mal — archivos `.bak`, copias de `/etc/shadow`, dumps de DB en directorios web... en HTB es un vector clásico: `find / -name "*.bak" 2>/dev/null`
+    
+- **Persistencia otra vez:** cron + script + rsync = canal encubierto que sincroniza datos cada hora. La auditoría de `/etc/cron*` que anoté en Task Scheduling es exactamente la defensa.
 
 
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
