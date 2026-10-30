@@ -8,7 +8,7 @@
 
 - Conexión: Pwnbox (US StartingPoint 2) — 1h51m de sesión
 - Target spawneado: IP anotada y verificada
-![[Pasted image 20261024222444.png]]
+![](../imgs-meow/Pasted image 20261024222444.png)
 
 ### Tareas de la plataforma (respondidas)
 
@@ -31,7 +31,7 @@ ping -c4 10.129.120.195
 > comando ping manda paquetes hasta que se haga `ctrl + c`
 
 → 4/4 replies, ttl=63. Conexión estable.
-![[Pasted image 20261024223201.png]]
+![](../imgs-meow/Pasted image 20261024223201.png)
 
 ##### Escaneo de puertos
 ```bash
@@ -43,7 +43,7 @@ PORT STATE SERVICE VERSION
 ```
 
 **Un solo puerto abierto: 23/tcp (telnet).** Sin banner que oculte más superficie. El resto: 999 cerrados.
-![[Pasted image 20261024223401.png]]
+![](../imgs-meow/Pasted image 20261024223401.png)
 
 ## 3. Foothold — Telnet con credenciales débiles
 ```bash
@@ -60,7 +60,7 @@ Intentos de login:
 Welcome to Ubuntu 20.04.2 LTS (GNU/Linux 5.4.0-77-generic x86_64)  
 root@Meow:~#
 ```
-![[Pasted image 20261024223625.png]]
+![](../imgs-meow/Pasted image 20261024223625.png)
 
 ### ¿Por qué funcionó?
 Bien dada la guia adjunta al laboratorio, las preguntas de el lab y  al protocolo que se suele seguir(5 fases del hackeo), primero se hace un reconocimiento, el cual se hace usualmente con `nmap` con eso identificamos la superficie de ataque dado que se identifico el puerto 23 con protocolo `tcp`, accedo al objetivo mediante telnet luego ingreso 2 posibles usuarios los cuales son incorrectos y finalmente pruebo con el usuario `root` donde busco el flag con el comando `ls` .
@@ -74,7 +74,7 @@ root@Meow:~# cat flag.txt  #cat para leer la bandera y capturarla
 b40abdfe23665f766f9c61ecba8a4c19
 ```
 
-![[Pasted image 20261024224730.png]]
+![](../imgs-meow/Pasted image 20261024224730.png)
 
 ## 5. Lo que aprendí
 

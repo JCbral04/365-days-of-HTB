@@ -226,7 +226,7 @@ chown root:root shell    # cambia user y grupo a la vez
     
 - Referencia de binarios abusables: [**GTFObins**](gtfobins.github.io)
 
-## 4. Manejo del sistema (System Management 4/9)
+## 4. Manejo del sistema 
 
 ### Manejo de Usuarios
 
@@ -493,6 +493,173 @@ El detalle clave: **la llave sin passphrase** — necesaria para que cron corra 
 - **Recon:** los backups son un desastre de seguridad cuando se hacen mal — archivos `.bak`, copias de `/etc/shadow`, dumps de DB en directorios web... en HTB es un vector clásico: `find / -name "*.bak" 2>/dev/null`
     
 - **Persistencia otra vez:** cron + script + rsync = canal encubierto que sincroniza datos cada hora. La auditoría de `/etc/cron*` que anoté en Task Scheduling es exactamente la defensa.
+
+### Manejo de archivos del sistema
+
+**Lo que ya sabía / ya lo viví con las manos:**
+- Tipos de FS: ext4 (default moderno, journaling), ext2 (viejo, sin journal, útil en USBs), NTFS (compat dual-boot), XFS (archivos grandes, alto I/O), Btrfs (snapshots, integrity checks)
+- Journaling = registro de cambios que permite recuperarse de crashes (por eso ext4 > ext2)
+- Jerarquía, archivos, directorios, symlinks (`ln -s` — ya lo uso para wordlists)
+- **fdisk** → ya lo usé para crear sdb3 en mi USB (particionar es vivido, no leído)
+- **mount/umount** → monté mi volumen LUKS en /mnt/kali_persistence (¡esto exactamente!)
+- Swap = extensión de RAM en disco; hibernación guarda el estado ahí
+
+**Lo que NO sabía / refuerzo:**
+- **INODES el concepto  mas nuevo y diria que importante de la sección.** Cada archivo/directorio tiene un inode: estructura con sus metadatos (permisos, dueño, tamaño, timestamps) y punteros a los bloques de datos en disco. El **inode table** = la base de datos del kernel con TODOS los inodes. La analogía del módulo: los inodes son las fichas del catálogo de la biblioteca; el libro (los datos) está en otro lado.
+  - `ls -il` → muestra el número de inode (la `i`) junto a cada archivo
+  - **Caso clásico de producción:** un disco puede quedarse sin inodes ANTES de quedarse sin espacio → `df -i` muestra el uso de inodes (millones de archivos pequeños vacíos te agotan la tabla aunque el disco esté "vacío")
+- Tipos de archivo desde `ls`: regular, directorio, `l` = symlink (la primera letra de `ls -l`)
+- **`lsof`** → qué procesos tienen archivos abiertos / qué está usando un FS (imprescindible antes de `umount`: "target is busy" = algo lo tiene abierto → `lsof | grep <punto_montaje>` → matar el proceso → umount)
+- **`/etc/fstab`** → qué se monta automático al boot; opción `noauto` para evitar el montaje automático; mejor usar `UUID=` que `/dev/sdX` (los nombres cambian entre boots — ya lo viví cuando mi USB pasó de sdb a sda)
+- Swap con mkswap + swapon (crearlo en vivo); recomendación del módulo: **cifrar el swap** (datos sensibles pueden caer ahí temporalmente — conecta con mi interés en privacidad)
+
+** El ángulo pentest:**
+- **Forense/recuperación:** los inodes son la base de la recuperación de archivos borrados (el nombre muere, el inode y sus bloques siguen hasta que se reutilicen). Herramientas de forense trabajan sobre eso
+- **Swap = fuga de datos:** contraseñas y claves de sesiones pueden terminar en swap sin cifrado → en máquinas comprometidas, analizar swap es vector real; como defensa: swap cifrado
+- **Montar imágenes de disco** (mount -o loop) para inspeccionar dumps forenses — mismo mount que domino, aplicado a evidencia
+- En HTB: discos/montajes ocultos, `/etc/fstab` mal configurado con opciones peligrosas (`user`, `exec` en particiones que no deberían)
+
+### Contenerizacion
+
+**Lo que ya sabía (repaso, soy dev con Docker):**
+- Container vs VM: el container comparte el **kernel del host** (por eso es ligero); la VM virtualiza hardware entero
+- Imagen (template read-only) vs container (proceso corriendo de esa imagen)
+- Flujo completo: `Dockerfile` → `docker build -t nombre .` → `docker run -p 8022:22 -p 8080:80 -d nombre`
+- Docker Hub (registry público/privado), layers, `docker ps` / `stop` / `start` / `rm` / `rmi` / `logs`
+- Containers stateless: los cambios en un container corriendo MUEREN al pararlo → persistencia con **volumes**
+- Docker Compose / Kubernetes para orquestar múltiples containers
+- Namespaces + cgroups como base del aislamiento (conceptualmente)
+
+**Lo que NO sabía / refuerzo:**
+- **LXC (Linux Containers)** — la tecnología anterior/paralela: containers de SISTEMA (mini-VMs ligeras) vs Docker de APLICACIÓN. LXC usa cgroups + namespaces directamente del kernel
+
+| | LXC | Docker |
+|---|---|---|
+| Enfoque | sistema completo | app/microservicio |
+| Imagen | manual (rootfs a mano) | Dockerfile estándar |
+| Portabilidad | baja (ligada al host) | alta (registries) |
+| Curva | más admin Linux | user-friendly |
+| Seguridad default | menor | mayor (AppArmor/SELinux, fs read-only) |
+
+- Comandos LXC:
+```bash
+sudo lxc-create -n linuxcontainer -t ubuntu     # crear desde template
+lxc-ls                                          # listar
+lxc-start -n X / lxc-stop -n X                  # control
+lxc-attach -n X                                 # shell dentro
+lxc-info -n X                                   # estado, PID, IPs
+lxc-console -n X                                # consola tipo serial
+```
+
+- **Config por container:** `/var/lib/lxc/<nombre>/config` (los templates globales viven en `/usr/share/lxc/config/` — no confundir)
+- **Límites de recursos (cgroups) en el config:**
+```bash
+lxc.cgroup.cpu.shares = 512                  # default 1024 → 512 = la mitad del CPU
+lxc.cgroup.memory.limit_in_bytes = 512M      # tope de RAM
+```
+
+- `lxc-cgroup -n X cpu.shares 512` → límite EN VIVO sin reiniciar (temporal)
+- Bind mount container-host: `lxc.mount.entry = /host/path /container/path none bind,create=dir 0 0` en el config + restart
+- Hardening LXC: restrict access (SSH solo de IPs confiables), resource limits, aislamiento, MAC (AppArmor/SELinux), mantener actualizado
+    
+** El ángulo pentest (la razón de que esté en este curso):**
+
+- **El grupo `docker` ES root** — ya lo sabía de nuestro día DevSecOps, el módulo lo confirma: "both Docker and LXC can present a vector for local privilege escalation". Si comprometes un usuario que está en el grupo docker → `docker run -v /:/hostfs ubuntu chroot /hostfs` = root en el host
+- **Container escape:** un container mal configurado (--privileged, socket montado, kernel viejo con CVEs de namespaces) = salto al host. Es una categoría entera de ataque
+- **El Dockerfile del módulo es un caso de uso real de ataque/defensa:** un container Apache+SSH como "file hosting" para transferir archivos a targets (scp dentro, wget desde el target — la versión Dockerizada de mi `serve`)
+- **Lab seguro:** probar exploits/malware en containers aislados sin riesgo para la máquina anfitriona (por eso mi Kali con VMs/USB también aplica esta lógica)
+    
+- Defensa: detectar `docker` en grupos de usuarios normales (`grep docker /etc/group`) es auditoría básica
+
+## 5. Redes en linux o linux networking 
+
+Como pentesters, considero que una de las habilidades mas escenciales que se debe desarrollar es configurar y manejar redes en sistemas linux. Perfeccionar esto nos permite testear entornos de manera mas eficiente, manipular el trafico de las redes y identificar vulnerabilidades para explotar entre otras cosas.
+
+
+#### A. Configuración de interfaces (repaso + detalles finos)
+
+**Ver estado:**
+```bash
+ifconfig              # legible, ampliamente usado, pero DEPRECADO
+ip addr               # el moderno (iproute2); también: ip a
+```
+Ojo a los `altname` que muestra `ip` (enp0s3/ens3): el kernel tiene nombres predecibles nuevos, pero el sistema sigue exponiendo eth0.
+
+**Activar/desactivar y asignar:**
+```bash
+sudo ifconfig eth0 up                        # activar (o: ip link set eth0 up)
+sudo ifconfig eth0 192.168.1.2               # asignar IP
+sudo ifconfig eth0 netmask 255.255.255.0     # máscara
+sudo route add default gw 192.168.1.1 eth0   # gateway por defecto
+```
+**DNS:** `/etc/resolv.conf` → `nameserver 8.8.8.8`.  **NO PERSITENTE**: NetworkManager/systemd-resolved lo re-escriben solos. Patrón que se repite en Linux moderno: el archivo parece editable, pero otro servicio es el dueño real (igual que localectl/hostnamectl).
+
+**Persistencia real (estática clásica):** `/etc/network/interfaces`:
+
+```plain
+auto eth0
+iface eth0 inet static
+  address 192.168.1.2
+  netmask 255.255.255.0
+  gateway 192.168.1.1
+  dns-nameservers 8.8.8.8 8.8.4.4
+```
+
+Luego se ejecuta  `sudo systemctl restart networking` para aplicar los cambios. (En sistemas con NetworkManager  como mi Kali  esto NO aplica, en este la config va por nmcli/GUI. Dos mundos: ifupdown clásico vs NetworkManager moderno.)
+
+####  Modelos de control de acceso a red (NAC)
+
+**DAC (Discretionary):** el **dueño** del recurso decide quién entra (chmod/rwx — mi mundo Unix). Flexible, pero el usuario puede compartir de más.
+**MAC (Mandatory):** el **sistema** decide con etiquetas: cada recurso tiene un _security label_, cada usuario/proceso un _clearance_. Acceso solo si `clearance ≥ label`. Militar/gobierno/salud/finanzas. Más seguro, menos flexible. Implementaciones: SELinux, AppArmor.
+**RBAC (Role-Based):** permisos dependen de **rol/puesto**, no por persona ni por archivo. "Los DBAs pueden X". Escalable para organizaciones grandes; facilita admin (cambias de rol, no revisas miles de ACLs).
+ **En resmen:**
+**Mnemotecnia:** DAC = El dueño decide · MAC = La máquina decide · RBAC = El rol decide.
+
+#### C. Monitoreo de red
+|Herramienta|Para qué|
+|---|---|
+|`syslog` / `rsyslog`|logs del sistema centralizados|
+|`ss`|socket statistics (reemplazo moderno de netstat)|
+|`lsof`|qué archivos/sockets tiene abierto cada proceso|
+|**ELK** (Elasticsearch + Logstash + Kibana)|stack empresarial: recolecta, procesa y visualiza logs|
+|Wireshark / tshark / tcpdump|captura y análisis de tráfico (módulo aparte: Intro to Network Traffic Analysis)|
+
+#### D. Troubleshooting (la lista de siempre)
+
+```bash
+ping <host>            # ¿hay camino? (ICMP; ttl me dice saltos)
+traceroute <host>      # por dónde pasa: cada línea = un hop, 3 tiempos por hop
+netstat -a             # conexiones activas y puertos en LISTEN
+```
+
+**Leyendo traceroute:** `* * *` en un hop = ese equipo no respondió (bloquea ICMP, está caído, o filtra) — **no necesariamente está roto el camino**; sigue el tráfico igual. Ejemplo del módulo: hop 2 en silencio, hop 4 responde → seguimos adelante.
+
+**Problemas más comunes en pentest (del módulo):**
+
+1. Conectividad 2. Resolución DNS — _"it's always DNS"_ 3. Pérdida de paquetes 4. Performance **Causas típicas:** firewalls/routers mal configurados, cables, settings de red, hardware, DNS mal puesto, congestión, firmware sin parchear.
+
+#### E. Hardening: SELinux vs AppArmor vs TCP Wrappers
+
+||SELinux|AppArmor|TCP Wrappers|
+|---|---|---|---|
+|Tipo|MAC en el **kernel**|MAC vía **LSM** (kernel module)|Control de acceso **por IP**|
+|Modelo|Políticas granulares por proceso/archivo|**Perfiles por aplicación**|hosts.allow / hosts.deny|
+|Dificultad|Complejo|Sencillo|Muy simple|
+|Default en|RHEL/CentOS/Fedora|Ubuntu/Debian/**Kali**|muchos servicios|
+|Alcance|Recursos del sistema completos|Lo que el perfil de la app toca|Solo acceso de red a servicios|
+
+**Puntos finos del módulo:**
+
+- SELinux y AppArmor son AMBOS MAC, pero: SELinux integrado al kernel con control finísimo (y dolor de cabeza); AppArmor más manejable día a día
+- TCP wrappers: el servicio intercepta la conexión y la compara contra la lista allow/deny de IPs — protección de red básica y nada más (no toca recursos locales)
+- Los tres vienen en la mayoría de distros y se configuran con herramientas estándar
+
+#### F. Angulo del pentest 
+
+- **Captura de credenciales:** monitoreando tráfico, un login por conexión NO cifrada (FTP, Telnet, HTTP plano) = credenciales en claro para mí (ya lo viví: telnet de Meow manda todo en texto plano)
+- **MAC evasion:** SELinux/AppArmor limitan lo que un proceso comprometido puede hacer → la diferencia entre "shell" y "shell que lee /etc/shadow". Comandos de reconocimiento: `getenforce` (¿SELinux enforcing?), `aa-status` (perfiles AppArmor activos)
+- Clásico de CTF/writeups: "el exploit funciona pero SELinux lo bloquea" → `setenforce 0` (si tienes root) o bypass del perfil
+- TCP wrappers: ver `cat /etc/hosts.allow /etc/hosts.deny` en recon — puede explicar por qué un puerto "abierto" no te deja entrar desde tu IP
 
 
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
