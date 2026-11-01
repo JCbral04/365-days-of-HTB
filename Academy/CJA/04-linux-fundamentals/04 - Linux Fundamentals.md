@@ -662,6 +662,82 @@ netstat -a             # conexiones activas y puertos en LISTEN
 - TCP wrappers: ver `cat /etc/hosts.allow /etc/hosts.deny` en recon — puede explicar por qué un puerto "abierto" no te deja entrar desde tu IP
 
 
+### Remote Desktop Protocols in Linux 
+
+#### Los dos protocolos grandes
+
+| Protocolo | Mundo típico | Puerto | Notas |
+|---|---|---|---|
+| **RDP** | Windows | 3389 | gráfico, como estar frente al equipo |
+| **VNC** | Linux (multiplataforma) | 5900+ | protocolo RFB; un puerto por display: 5900=display :0, 5901=:1... |
+
+#### X11 / XServer (la tercera vía, la que ya usé sin saberlo)
+
+- X11 = el sistema gráfico de Unix; el **XServer** es la parte que dibuja. Network transparent: las apps pueden correr en una máquina y dibujarse en otra
+- **Clave conceptual:** VNC/RDP renderizan el escritorio en el SERVIDOR remoto y mandan imágenes por red. **X11 renderiza en tu MÁQUINA LOCAL** — la app remota solo manda las órdenes de dibujo → menos tráfico y carga
+- Puertos: TCP **6000-6009** (6000 = display :0, 6001 = :1...)
+- **Vulnerabilidad por defecto: TODO SIN CIFRAR.** Un atacante en la misma red puede **leer el contenido de tus ventanas sin sniffing tradicional** — con tools estándar:
+  - `xwd` → screenshots de ventanas X
+  - `xgrabsc` → captura de pantalla
+- CVEs históricos XOrg: **CVE-2017-2624/2625/2626** (session keys débiles/predecibles → código arbitrario en la sesión de otro usuario)
+- **Mitigación estándar:** tunelizar por SSH:
+  - Servidor: `X11Forwarding yes` en `/etc/ssh/sshd_config`
+  - Cliente: `ssh -X usuario@host /usr/bin/firefox` → la app remota aparece en TU pantalla, cifrada por el túnel
+
+#### XDMCP — el que NO debo usar
+
+- X Display Manager Control Protocol: gestiona sesiones X remotas vía **UDP 177**
+- Redirige una GUI entera (KDE/Gnome) a un cliente
+- **Inseguro por diseño** → MITM trivial: el atacante se interpone entre cliente y servidor X, se hace pasar por una parte y ejecuta comandos/lee datos
+- Regla: nunca en entornos que requieran seguridad
+
+#### VNC en la práctica (montar servidor TigerVNC)
+
+```bash
+# 1. Instalar (XFCE porque GNOME por VNC es inestable)
+sudo apt install xfce4 xfce4-goodies tigervnc-standalone-server -y
+vncpasswd                       # password de 8 chars max (límite del protocolo)
+
+# 2. Config en ~/.vnc/
+#    xstartup → qué escritorio abre la sesión (startxfce4)
+#    config    → geometry=1920x1080, dpi=96
+chmod +x ~/.vnc/xstartup
+
+# 3. Arrancar y administrar
+vncserver                       # crea display :1 → puerto 5901
+vncserver -list                 # muestra display + puerto + PID
+vncserver -kill :1              # matar sesión
+```
+
+- Dos conceptos de servidor VNC: el que ofrece **la pantalla real** del host (uso en soporte) vs **sesiones virtuales** por usuario (concepto terminal server)
+    
+- Implementaciones: TigerVNC, TightVNC, RealVNC, UltraVNC (RealVNC/UltraVNC destacan por cifrado)
+    
+- **Contraseñas VNC:** el límite de 8 caracteres es del protocolo — débil por herencia
+    
+
+#### El patrón de oro: VNC por túnel SSH
+
+```bash
+# 1. Túnel (mi 5901 local → su 5901, localhost)
+ssh -L 5901:127.0.0.1:5901 -N -f -l htb-student 10.129.14.130
+
+# 2. Conectar por el túnel
+xtightvncviewer localhost:5901
+```
+
+`-L` = port forwarding local · `-N` = no shell · `-f` = background. El detalle de pivoting/tunneling se profundiza en su módulo aparte.
+
+#### Conexiones con mi historial + ángulo pentest
+
+- **Mi Pwnbox** = exactamente este stack: Xtigervnc (localhost:5901, invisible desde afuera) + nginx reenviando el HTTP → ese "port forwarding en el menú de HTB" del capítulo 1 era ESTO formalizado
+- **Recon:** ver 6000-6009 abiertos en un target Linux = X11 expuesto = leer sus ventanas (`xwd`), potencial sesión completa
+- **Recon:** 5900+ = VNC → fuerza bruta de esa contraseña de 8 chars es viable
+- **Recon:** UDP 177 = XDMCP = protocolo viejo e inseguro = red flag en auditoría
+- Como defensa: VNC solo por túnel SSH, nunca expuesto; X11Forwarding solo para lo necesario
+
+> Patrón que se repite toda la sección: **protocolo gráfico remoto + cifrado por defecto = NO**. Todos (X11, XDMCP, VNC plano) mandan datos sensibles en claro o con crypto débil → la respuesta universal es el túnel SSH. Mismo principio que mi FTP manual de hace semanas: los protocolos viejos se domestican con SSH.
+
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 
 - `/etc/passwd` legible por todos: `usuario:x:UID:GID:desc:home:SHELL`
