@@ -738,10 +738,11 @@ xtightvncviewer localhost:5901
 
 > Patrón que se repite toda la sección: **protocolo gráfico remoto + cifrado por defecto = NO**. Todos (X11, XDMCP, VNC plano) mandan datos sensibles en claro o con crypto débil → la respuesta universal es el túnel SSH. Mismo principio que mi FTP manual de hace semanas: los protocolos viejos se domestican con SSH.
 
+## 6. Linux hardening
 
-### Linux Security (cap. 6, sección 1/3)
+### Linux Security 
 
-Todo sistema tiene y/o existe la posibilidad de que haya un riesgo de intrusión. Un Linux bien administrado es más difícil de comprometer que un Windows domain-joined (menos malware, menos superficie), pero eso no lo hace inmune — solo menos apuntado. Esta sección es la lista de lo mínimo que un admin debe hacer. Y como pentester, cada ítem es un lugar donde mirar si fue mal hecho.
+Por naturaleza, todos los sistemas tienen un riesgo inherente de intrusión; algunos presentan más riesgo que otros (un servidor web expuesto a Internet con varias apps es más jugoso que una laptop). Linux es menos propenso a virus que afectan Windows y presenta una superficie de ataque menor que los hosts unidos a un dominio Active Directory
 
 #### 1. El fundamento #1: mantener todo actualizado
 
@@ -865,6 +866,225 @@ ftpd : 10.129.22.0/24          # esa red, sin FTP
 |Servicios innecesarios apagados|`ss -tulnp` → todo lo que SÍ está abierto es superficie|
 
 > El hardening es como cerrar puertas y ventanas detu casa, y pues yo diria que no existe "casa imposible de robar" sino que simplemente existe "casa que no vale la pena robar". El objetivo no es invulnerable porque es imposible sino mas bien es que sea más caro atacarte que lo que ganan robandote.
+
+### Firewall setup
+
+El principal proposito de un **firewall**  es proveer un mecanismo de seguridad, controlar y monitorear el trafico de la red en distintos segmentos, filtrando por reglas, protocolos y puertos. Linux lo trae integrado vía **Netfilter**: un framework de *hooks* dentro del **kernel** que intercepta y puede modificar cada paquete que pasa. La herramienta para programar esas reglas es iptables (Netfilter es el motor, iptables el volante).
+
+**Historia rápida:** `ipfwadm` → `ipchains` → **iptables** (kernel 2.4, año 2000) → hoy coexisten con reemplazos modernos.
+
+#### Las alternativas modernas
+
+| Herramienta | Qué es |
+|---|---|
+| **iptables** | el clásico, de facto estándar 20+ años |
+| **nftables** | reemplazo moderno: mejor performance, sintaxis nueva (NO compatible con iptables — migrar = reescribir) |
+| **ufw** | front-end simple (la "U" = Uncomplicated). Es lo que usé en mi Xubuntu: `ufw default deny incoming; ufw enable`. Debajo sigue siendo iptables/nftables |
+| **firewalld** | firewall dinámico con **zonas** y servicios predefinidos (mundo RHEL/Fedora) |
+
+#### Los 5 componentes del modelo
+
+1. **Tables** → organizan reglas según el tipo de trabajo
+2. **Chains** → grupos de reglas aplicadas a un flujo concreto de tráfico
+3. **Rules** → criterios (matches) + acción (target)
+4. **Matches** → qué características del paquete evaluar (IP, puerto, protocolo, estado...)
+5. **Targets** → qué hacer con los paquetes que coinciden
+
+#### Las tablas y sus cadenas
+
+| Tabla | Para qué | Cadenas built-in |
+|---|---|---|
+| **filter** | filtrar tráfico (la del día a día) | INPUT, OUTPUT, FORWARD |
+| **nat** | modificar IP origen/destino (NAT) | PREROUTING, POSTROUTING |
+| **mangle** | modificar campos del header | las 5 |
+| **raw** | opciones especiales de procesamiento | PREROUTING, OUTPUT |
+
+**Traducción de las cadenas clave (filtro):**
+- **INPUT** → paquetes que ENTRAN a esta máquina
+- **OUTPUT** → paquetes que SALEN de esta máquina
+- **FORWARD** → paquetes que ATRAVIESAN la máquina (si actúa de router)
+- **PREROUTING** → antes de decidir ruta (mangle destino)
+- **POSTROUTING** → después de decidir ruta (mangle origen)
+
+**Cadenas definidas por el usuario:** se crean para agrupar reglas (ej: "todas las reglas de mis web servers", "todo el tráfico al puerto 80") → se saltan a ellas desde las built-in. Orden y mantenimiento más limpios.
+
+#### Targets (las acciones)
+
+| Target | Qué hace |
+|---|---|
+| **ACCEPT** | deja pasar el paquete |
+| **DROP** | lo tira **en silencio** — el emisor no sabe nada, espera hasta timeout |
+| **REJECT** | lo tira **avisando** — responde con error (RST/ICMP), el emisor sabe que hay algo ahí |
+| **LOG** | registra el paquete en el log del sistema |
+| **SNAT / DNAT** | cambia IP origen/destino (NAT: privada→pública / reenvío) |
+| **MASQUERADE** | SNAT para IP dinámica (cuando tu IP pública cambia) |
+| **REDIRECT** | redirige a otro puerto/IP |
+| **MARK** | marca el paquete para routing avanzado |
+
+** DROP vs REJECT es decisión de seguridad, no técnica:** DROP hace que tu host parezca *muerto/inexistente* al escanear (stealth); REJECT confirma que hay un host vivo con firewall. Postura paranóica = default DROP.
+
+#### Matches (los criterios)
+
+| Match | Criterio |
+|---|---|
+| `-p` / `--protocol` | protocolo (tcp, udp, icmp) |
+| `--dport` / `--sport` | puerto destino / origen |
+| `-s` / `-d` | IP origen / destino |
+| `-m state` | estado de conexión (NEW, ESTABLISHED, RELATED) |
+| `-m conntrack` | tracking de conexión (el moderno) |
+| `-m multiport` | varios puertos a la vez |
+| `-m string` | el paquete CONTIENE cierto string (filtrado de contenido) |
+| `-m limit` | rate limiting (anti-DoS básico) |
+| `-m mac` | por MAC address |
+| `-m iprange` | por rango de IPs |
+
+#### Anatomía de una regla (desglosada letra por letra)
+
+```bash
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+``` 
+
+- `A INPUT` : **A**ppend a la cadena INPUT (también: `-I` insertar, `-D` borrar, `-F` vaciar)
+- `-p tcp`  match: protocolo TCP
+- `--dport 22` match: puerto destino 22
+- `-j ACCEPT`: **j**ump al target ACCEPT
+
+#### Lo que el módulo NO dice pero es fundamental (mi análisis)
+
+1. **Las reglas se evalúan en orden, primera coincidencia gana** si una regla **`ACCEPT`** pasa antes que tu **`DROP`**, el **`ACCEPT`** ganó. El ordon lo es todo.
+2. **Política por defecto:** si ninguna regla coincide, se aplica la política de la cadena (`iptables -P INPUT DROP` ¿esto que significa? significa que lo que no está explícitamente permitido, muere). La postura segura es **default DROP + ACCEPT explícitos**.
+3. `iptables -L -n -v` → listar reglas actuales con contadores de paquetes (-n = números, no resolución DNS)
+
+#### Ángulo pentest
+
+- **En el host comprometido:** `iptables -L` me dice qué tráfico el admin INTENTA bloquear — y a veces encuentras reglas mal hechas (DROP en INPUT pero todo permitido en FORWARD, reglas duplicadas, default ACCEPT)
+- **Fingerprinting:** ¿un puerto me responde REJECT o DROP? DROP es igual a un host cuidado/paranoico; REJECT implica un firewall presente pero hablador. Entonces cambiamos la estrategia de escaneo
+- **Defensa activa en mis labs:** mi `ufw default deny` del portátil es exactamente esta postura aplicada
+- NAT targets (DNAT/REDIRECT) = la base del port forwarding y del pivoting que veré en su módulo aparte (conecta con `ssh -L` de la sección VNC)
+
+
+### System logs
+
+Los `logs` del sistema en este caso en linux vendrian siendo una serie de archivos que contienen informacion acerca de el sistema y  las actividades que tienen o tuvieron accion dentro de el. Los logs son de suma importancia porque en ellos podemos monitorear y resolve problemas del sistema ya que estos nos proveen indicios del comportamiento, status y eventos de seguridad del sistema. Como pentesters considero que debemos leerlos de dos formas: 
+1. como auditores (buscar lo sospechoso).
+2. como atacantes (ver qué rastro dejamos y si algo detectó nuestras pruebas).
+
+
+#### Los 5 tipos de logs y dónde viven
+
+Existen 5 tipos de logs distintos cada uno con un proposito distinto pero todos sirven al mismo proposito asegurar la seguridad del sistema.
+
+| Tipo | Archivo | Qué revela |
+|---|---|---|
+| **Kernel** | `/var/log/kern.log` | drivers, syscalls, crashes, hardware |
+| **Sistema** | `/var/log/syslog` | servicios que arrancan/paran, reboots, eventos de sistema |
+| **Autenticación** | `/var/log/auth.log` (Debian/Ubuntu) · `/var/log/secure` (RHEL/CentOS) | **LA joya**: logins exitosos y fallidos, sudo ejecutado, sesiones |
+| **Aplicación** | `/var/log/apache2/error.log`, `/var/log/mysql/error.log`, etc. | errores y actividad de apps específicas |
+| **Seguridad** | `/var/log/fail2ban.log`, `/var/log/ufw.log`, auditd | eventos de las herramientas de defensa |
+
+
+**Locations de acceso por servicio (la tabla del módulo, para no googlearla jeje):**
+
+| Servicio | Log de acceso |
+|---|---|
+| Apache | `/var/log/apache2/access.log` |
+| Nginx | `/var/log/nginx/access.log` |
+| OpenSSH | `/var/log/auth.log` (Ubuntu) · `/var/log/secure` (RHEL) |
+| MySQL | `/var/log/mysql/mysql.log` |
+| PostgreSQL | `/var/log/postgresql/postgresql-<versión>-main.log` |
+| systemd | `/var/log/journal/` (binario — se lee con `journalctl`) |
+
+#### Cómo se lee un auth.log
+
+- Feb 28 18:15:01 sshd[5678]: Accepted publickey for admin from 10.14.15.2 
+→ login OK por LLAVE (¿password? revisar si es lo esperado) 
+- Feb 28 18:15:03 sudo: admin ... COMMAND=/bin/bash 
+→ abrió shell como root con sudo: quién, cuándo, qué 
+- Feb 28 18:15:05 sudo: admin ...  COMMAND=/usr/bin/apt-get install netcat-traditional 
+→ PELIGRO instaló nc: clásico de post-explotación 
+- Feb 28 18:15:12 kernel: firewall: unexpected traffic allowed on port 22 
+→ el firewall registró algo anómalo (¿y nadie lo vio?) 
+- Feb 28 18:15:18 systemd-logind: New session 4321 of user admin 
+→ sesión nueva registrada (correlacionar con el login) 
+- Feb 28 18:15:21 CRON: session opened for user root 
+→ cron como root: normal en un admin... o persistencia (Task Scheduling)
+
+**Los 3 patrones que gritan:**
+
+| Patrón | Qué significa |
+|---|---|
+| `Failed password` ×N desde la misma IP | fuerza bruta en curso |
+| `COMMAND=` con `nc` / `curl` / `wget` / `base64` | alguien trajo herramientas post-login |
+| `session opened for user X` inesperado | credencial nueva robada, o abuso de una existente |
+
+**Regla de correlación :** ninguna linea sola cuenta la historia. El auth.log  dice QUIÉN entró; el syslog  dice QUÉ pasó en el sistema; los timestamps los unen. Un incidente se reconstruye cruzando los tres, no leyendo uno solo.
+
+#### El triángulo del pentester con logs
+
+1. **Como atacante:** tras explotar, los logs son el ENEMIGO borrarlos es de manual básico pero *dejar rastro borrado* también lo es (`~/.bash_history`, auth.log, syslog). Y como defensa: logs enviados a un SIEM remoto = no los puedo borrar localmente
+2. **Como auditor:** estos archivos son mi fuente #1 de "¿qué pasó aquí?" — reconstruyo la línea de tiempo de un ataque desde auth.log + syslog
+3. **Como tester ético:** reviso los logs DESPUÉS de mi prueba para ver qué alertas generé → informo al cliente qué detectó su defensa (y qué no — ese "qué no" es parte del reporte)
+
+#### Configuración sana de logs (el lado admin)
+
+- Niveles de log apropiados (no todo en DEBUG ni todo en silencio)
+- **Log rotation** — los logs crecen infinito; `logrotate` los rota/comprime/borra por política
+- Protegerlos de acceso no autorizado + revisarlos REGULARMENTE (un log que nadie lee no sirve)
+- Conexión con hardening anterior: sin NTP los timestamps no correlacionan entre máquinas = forense rota
+
+#### Las herramientas ya las tengo
+
+```bash
+tail -f /var/log/auth.log          # seguir en vivo (el que más uso)
+grep "Failed password" /var/log/auth.log | wc -l   # ¿cuántos intentos fallidos?
+grep -E "(COMMAND=)" /var/log/auth.log             # auditoría de sudo
+journalctl -u ssh --no-pager       # logs de servicio (del cap. de systemctl)
+```
+
+## 7. Distribuciones de linux VS solaris
+
+### Solaris 
+
+#### ¿Qué es?
+
+- **UNIX certificado** (NO Linux): descendiente de System V UNIX, desarrollado por Sun Microsystems en los 90, hoy propiedad de **Oracle**
+- Sistema **propietario/cerrado**: el código fuente no es público, no puede auditarse por la comunidad
+- Diseñado para **alta disponibilidad, tolerancia a fallos y escalabilidad** — computo empresarial de misión crítica
+- Sectores típicos: **banca, finanzas, gobierno**, grandes datacenters, cloud y virtualización
+- Hardware histórico **SPARC** (RISC propio de Sun) e hipervisor incluido: Oracle VM Server for SPARC
+- Estado actual: en declive, pero sigue vivo en infraestructura **legacy** que "no se toca porque funciona" — y eso significa: sin parches de hace años
+
+#### Diferencias clave vs Linux
+
+| Categoría | Linux (Ubuntu/Debian) | Solaris |
+|---|---|---|
+| Código | open source | **propietario, cerrado** |
+| File system | ext4, XFS... (ZFS vía port) | **ZFS nativo** (su invento: compresión, snapshots, escalabilidad enorme) |
+| Gestión de servicios | systemd | **SMF** (Service Management Facility) |
+| Paquetes | apt/dpkg | **IPS** (Image Packaging System) / pkgadd |
+| Seguridad | sudo + permisos clásicos | **RBAC nativo** (permisos granulares por rol) + MAC |
+| Hardware | x86 y más | SPARC histórico + x86 |
+| `/kernel` | no existe como tal | **existe**: módulos del kernel ahí |
+
+#### Estructura de directorios (casi idéntica a Linux )
+
+La tabla del módulo muestra el mismo árbol que  (`/ /bin /boot /dev /etc /home /lib /mnt /opt /proc /sbin /tmp /usr /var /lost+found`) con DOS diferencias notables:
+- **`/kernel`** → módulos del kernel en directorio propio (en Linux viven en `/lib/modules`)
+- **todo lo demás coincide** → la lección: el modelo mental FHS es universal en el mundo Unix
+
+#### La tabla de equivalencias (el corazón práctico de la sección)
+
+| Gesto | Linux | Solaris | Nota |
+|---|---|---|---|
+| Info del sistema | `uname -a` | `showrev -a` | showrev da MÁS: patch level, hardware provider, arquitectura |
+| Instalar paquete | `sudo apt-get install X` | `pkgadd -d X` | **sin sudo**: RBAC da los permisos granulares (sudo llegó en Solaris 11) |
+| Cambiar permisos | `chmod 700 file` | `chmod 700 file` | **igual** — mismo modelo rwx |
+| Buscar SUID | `find / -perm 4000` | `find / -perm -4000` | ⚠️ **lleva guión** en Solaris — si no, no matchea igual |
+| Compartir NFS | `/etc/exports` + exportfs | `share -F nfs -o rw /export/home` | persistente en **`/etc/dfs/dfstab`** |
+| Montar NFS | `mount -t nfs srv:/share /mnt` | `mount -F nfs srv:/share /mnt` | **`-F` en vez de `-t`** |
+| Files de un proceso | `lsof -c apache2` | `pfiles \`pgrep httpd\`` | mismo resultado |
+| Trazar syscalls | `strace -p <pid>` | `truss <cmd>` | **truss es más potente**: traza SEÑALES y procesos HIJOS (strace no) |
+
 
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 

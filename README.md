@@ -2,9 +2,9 @@
 
 > 365 días de aprendizaje continuo en hacking ético — write-ups y notas de mi progreso en **Hack The Box Academy** (path: Junior Cybersecurity Analyst)
 > 
-**Día actual: 8 / 365** 
+**Día actual: 11 / 365** 
 
-![Progress](https://img.shields.io/badge/CJA%20path-25.5%25-orange)
+![Progress](https://img.shields.io/badge/CJA%20path-27.4%25-orange)
 
 ## ¿Por qué existe este repo?
 
@@ -17,11 +17,11 @@ Documento mi proceso de aprendizaje en ciberseguridad de forma pública: qué es
 | Introduction to Information Security | COMPLETADO |
 | Network Foundations | COMPLETADO |
 | Introduction to Networking | COMPLETADO |
-| Linux Fundamentals | 🔵 en progreso (80%) |
-| Introduction to Bash Scripting | ⬜ |
+| Linux Fundamentals | COMPLETADO |
+| Introduction to Bash Scripting | 🔵 en progreso (0%) |
 | ... | ⬜ |
 
-**Path general: 25.5% completado**
+**Path general: 27.4% completado**
 
 ## Estructura
 ```
