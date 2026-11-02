@@ -738,6 +738,134 @@ xtightvncviewer localhost:5901
 
 > Patrón que se repite toda la sección: **protocolo gráfico remoto + cifrado por defecto = NO**. Todos (X11, XDMCP, VNC plano) mandan datos sensibles en claro o con crypto débil → la respuesta universal es el túnel SSH. Mismo principio que mi FTP manual de hace semanas: los protocolos viejos se domestican con SSH.
 
+
+### Linux Security (cap. 6, sección 1/3)
+
+Todo sistema tiene y/o existe la posibilidad de que haya un riesgo de intrusión. Un Linux bien administrado es más difícil de comprometer que un Windows domain-joined (menos malware, menos superficie), pero eso no lo hace inmune — solo menos apuntado. Esta sección es la lista de lo mínimo que un admin debe hacer. Y como pentester, cada ítem es un lugar donde mirar si fue mal hecho.
+
+#### 1. El fundamento #1: mantener todo actualizado
+
+```bash
+sudo apt update && sudo apt dist-upgrade
+```
+- `update` = refresca la lista de paquetes disponibles (no instala nada)
+- `dist-upgrade` = actualiza TODO lo instalado, incluidos cambios de dependencias mayores
+- **Dato clave :** algunos kernels **no se actualizan solos** — hay admins que corren `apt upgrade` por años sin notar que el kernel sigue viejo (¡y el kernel viejo = exploits públicos conocidos = privesc gratis!), por eso algo tan simple como mantener el sistema actualizado puede mantenerlo seguro.
+
+#### 2. Firewall
+
+Si el firewall de red (el del router/perímetro) no está bien, el propio Linux puede filtrar tráfico con:
+- **iptables** (la herramienta clásica de reglas de firewall)
+- o frontends como **ufw** (Ubuntu) — que ya conozco de mi Xubuntu
+
+#### 3. Endurecer SSH (el servicio más atacado del planeta)
+
+Dos reglas de oro en `/etc/ssh/sshd_config`:
+
+```plain
+PasswordAuthentication no     # solo llaves, nada de passwords bruteforceables
+PermitRootLogin no            # root jamás entra directo por SSH
+```
+
+- El patrón completo: entrar como usuario normal + `sudo` para lo administrativo. **No administrar como root** es principio básico
+- **Principio de menor privilegio:** si un usuario necesita correr UN comando como root, ese comando va específico en la config de sudoers — NO se le dan derechos sudo completos. (El archivo es `/etc/sudoers`, editado con `visudo` — nunca a mano, un error ahí te deja sin root)
+    
+#### 4. fail2ban — el guardián contra fuerza bruta
+
+- Cuenta los intentos fallidos de login; al llegar al máximo configurado, **bloquea la IP atacante** (por ejemplo baneándola con iptables o TCP wrappers)
+- Es la defensa estándar contra brute force de SSH/FTP
+- **Conexión pentest:** cuando en HTB haces fuerza bruta de SSH y de repente "connection refused" o timeouts... es fail2ban (o un admin) baneándote. Por eso los bruteforce reales van con ritmo y wordlists inteligentes, no a martillazos
+    
+
+#### 5. Auditoría periódica (esto ES tu checklist de pentest)
+
+El modulo nos llama a  auditar periódicamente buscando vectores de **escalada de privilegios**:
+
+- kernel desactualizado → `uname -r` + buscar CVEs
+- problemas de permisos de usuarios
+- **archivos world-writable** (cualquiera los edita)
+- **cron jobs mal configurados** (¡mi sección anterior! el patrón de HTB)
+- servicios mal configurados
+- **SUID/SGID no deseados** (¡ Permission Management!)
+    
+Como pentester esta lista la recorres AL REVÉS en cada máquina: kernel → permisos → cron → servicios → SUID. Es literalmente el capítulo 4 de este módulo aplicado ofensivamente.
+
+#### 6. SELinux / AppArmor (el recordatorio)
+
+- Módulo de seguridad del kernel con políticas de control de acceso (MAC — del capítulo de NAC)
+- SELinux: cada proceso/archivo/objeto lleva una **etiqueta**; reglas de política controlan quién accede a qué, **enforceadas por el kernel**. Control granular hasta "quién puede append a este archivo o moverlo"
+- AppArmor: mismo objetivo, más simple (perfiles por app)
+- Como pentester: `getenforce` / `aa-status` para ver si están activos — cambian lo que tus exploits pueden hacer
+
+#### 7. Herramientas de seguridad mencionadas
+
+|Tool|Para qué|
+|---|---|
+|**Snort**|IDS/IPS: detecta ataques en el tráfico de red (reglas tipo "esto parece un exploit X")|
+|**chkrootkit**|busca rootkits conocidos en el sistema|
+|**rkhunter**|idem, otra herramienta del mismo tipo|
+|**Lynis**|auditoría completa: escanea el sistema y reporta hardening faltante (checks automatizados de TODO lo de esta lista)|
+
+#### 8. El checklist de hardening (cada ítem explicado)
+
+1. **Quitar/deshabilitar servicios y software innecesarios** — cada servicio escuchando es una puerta posible. `systemctl list-units --type=service` y purgar lo que no sirve
+2. **Eliminar servicios con autenticación sin cifrar** — Telnet, FTP plano, HTTP para login... (¡exactamente lo que yo exploté en Meow! Telnet con root vacío era DOS fallas de esta lista a la vez)
+3. **NTP activo** (reloj sincronizado = logs correlables) **y Syslog corriendo** (sin logs no hay detección ni forense)
+4. **Una cuenta por usuario** (no cuentas compartidas: nada de auditoría quién hizo qué)
+5. **Contraseñas fuertes** forzadas
+6. **Password aging** (expiración) y bloqueo de reuso de contraseñas viejas
+7. **Bloquear cuentas tras fallos de login** (fail2ban / pam_tally)
+8. **Desactivar binarios SUID/SGID no necesarios** — cada SUID es un "mini root potencial" (GTFObins). Auditar con mi `find -perm -4000`
+
+> Cierre del módulo: _"la seguridad no es un producto, es un proceso"_. La lista nunca está completa; depende de qué tan bien el admin conozca SU sistema.
+
+#### 9. TCP Wrappers — explicado completo (lo más práctico de la sección)
+
+**Que es?:** Podemos definirlo como un mecanismo de seguridad del propio Linux que controla **qué servicios aceptan conexiones desde qué IPs/dominios**, sin firewall. Cuando un cliente intenta conectar a un servicio, el sistema consulta primero las reglas de TCP wrappers: si la IP coincide con lo permitido → acceso; si no → conexión denegada.
+
+**Los dos archivos:**
+
+- `/etc/hosts.allow` → qué servicios+hosts tienen permitido el acceso
+- `/etc/hosts.deny` → qué servicios+hosts están denegados
+
+**Sintaxis:** `servicio : host(s)` donde:
+
+- servicio = nombre del daemon (`sshd`, `ftpd`, `telnetd`, o `ALL` para todos)
+- host = IP exacta, rango en CIDR, o dominio empezando con `.` (`.inlanefreight.local` = cualquier host de ese dominio)
+
+```bash
+# hosts.allow — permitir
+sshd : 10.129.14.0/24          # SSH solo desde esa red
+ftpd : 10.129.14.10            # FTP solo desde ese host
+telnetd : .inlanefreight.local # Telnet desde ese dominio
+
+# hosts.deny — denegar
+ALL : .inlanefreight.com       # TODO bloqueado desde ese dominio
+sshd : 10.129.22.22            # ese host, sin SSH
+ftpd : 10.129.22.0/24          # esa red, sin FTP
+```
+
+**Reglas de comportamiento (IMPORTANTES):**
+
+- **Orden importa:** se aplica la PRIMERA regla que coincide (como las reglas de firewall, de arriba hacia abajo)
+    
+- **NO reemplaza un firewall:** solo controla acceso a SERVICIOS, no a puertos en general. Es una capa extra, básica
+    
+
+#### Ángulo pentest (resumen de la sección entera leída ofensivamente)
+
+|El admin DEBE...|El pentester BUSCA...|
+|---|---|
+|Parchear kernel|`uname -r` viejo → exploit público|
+|Desactivar SUID|`find -perm -4000` → GTFObins|
+|Auditar cron|`ls /etc/cron*` → cron de root ejecutando script editable|
+|Endurecer SSH|PasswordAuth sí activo → hydra|
+|fail2ban|no siempre instalado → fuerza bruta tranquila|
+|TCP wrappers|`cat hosts.allow/deny` → IPs confiables que puedo suplantar/spoofear|
+|Servicios innecesarios apagados|`ss -tulnp` → todo lo que SÍ está abierto es superficie|
+
+> El hardening es como cerrar puertas y ventanas detu casa, y pues yo diria que no existe "casa imposible de robar" sino que simplemente existe "casa que no vale la pena robar". El objetivo no es invulnerable porque es imposible sino mas bien es que sea más caro atacarte que lo que ganan robandote.
+
 ## Lo que viví en la sesión (no está en el módulo, pero importa)
 
 - `/etc/passwd` legible por todos: `usuario:x:UID:GID:desc:home:SHELL`
