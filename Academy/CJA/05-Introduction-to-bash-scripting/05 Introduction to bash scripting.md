@@ -113,3 +113,57 @@ count # Y finalmente llamamos el metodo para contar y cuenta pues var
 ```
 Resultado: 5388161 
 
+### Arguments, Variables, and Arrays (Bash Scripting 3/10)
+
+**Lo que ya sabía (repaso):**
+- `$1`, `$2`, `$3`... = argumentos posicionales pasados al script (ya lo usé en mi función `serve()` donde `${1:-8000}` toma el primer argumento)
+- `echo $variable` = mostrar valor de variable
+- `chmod +x script.sh` = dar permiso de ejecución
+- `./script.sh` vs `bash script.sh` = ejecutar con el shebang definido vs forzar bash como intérprete
+- Arrays básicos en otros lenguajes (Python, JavaScript)
+
+**Lo que NO sabía / no tenía claro:**
+
+**Argumentos y variables especiales:**
+- Hasta **9 argumentos** posicionales: `$0` (nombre del script) a `$9`
+- **Variables especiales** que no necesito declarar:
+
+| Variable | Qué guarda |
+|---|---|
+| `$#` | número de argumentos recibidos |
+| `$@` | lista de TODOS los argumentos |
+| `$n` | argumento en posición n (`$1`, `$2`...) |
+| `$$` | PID del proceso actual |
+| `$?` | exit status del último comando (0 = éxito, 1+ = fallo) |
+
+- El ejemplo del módulo con `$#`, `$0`, `$1`:
+```bash
+if [ $# -eq 0 ]          # ¿no me pasaron argumentos?
+then
+    echo -e "Usage:\n\t$0 &lt;domain&gt;"   # $0 = nombre del script
+    exit 1
+else
+    domain=$1            # $1 = primer argumento
+fi
+```
+
+**Variables — la regla del espacio:**
+
+- Asignación: **`variable="valor"`** (sin espacios alrededor del `=`)
+- Uso: **`$variable`** (con `$`)
+- Error clásico: `variable = "valor"` → bash interpreta `variable` como comando a ejecutar
+
+**Arrays en Bash:**
+
+- Declaración: `dominios=(val1 val2 val3)` — espacios separan elementos
+    
+- Acceso: `${dominios[0]}` — índice empieza en 0
+    
+- **Comillas y arrays:** si pongo `"val1 val2"` dentro del array, se guarda como UN solo elemento (las comillas "blindan" los espacios internos)
+
+```bash
+dominios=(www.test.com ftp.test.com vpn.test.com)
+echo ${dominios[0]}    # www.test.com
+echo ${dominios[1]}    # ftp.test.com
+```
+
