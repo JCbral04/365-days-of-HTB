@@ -167,3 +167,78 @@ echo ${dominios[0]}    # www.test.com
 echo ${dominios[1]}    # ftp.test.com
 ```
 
+### Conditionals (Bash Scripting 4/10)
+
+**Lo que ya sabía (repaso):**
+- `if [ condición ]; then ... fi` — estructura básica de condicionales en bash
+- `if / then / elif / else / fi` — flujo con múltiples ramas
+- `[[ ... ]]` vs `[ ... ]` — ya los usaba, aunque no entendía bien la diferencia
+- `&&` (AND lógico) y `||` (OR lógico) — ya los usé en mis pipelines y en el ejercicio anterior
+- `-gt`, `-lt`, `-eq` — operadores de comparación numérica (ya los usé en el `for` del base64)
+
+**Lo que NO sabía / no tenía claro:**
+
+**Comparación de strings vs integers: operadores DISTINTOS**
+
+| Tipo | Operadores | Ejemplo |
+|---|---|---|
+| **String** | `==`, `!=`, `&lt;`, `&gt;`, `-z`, `-n` | `[ "$var" == "HackTheBox" ]` |
+| **Integer** | `-eq`, `-ne`, `-lt`, `-le`, `-gt`, `-ge` | `[ $# -gt 1 ]` |
+
+- **Error clásico:** usar `&gt;` con enteros dentro de `[ ]` → bash lo interpreta como redirección de archivo, no como comparación. Solución: usar `-gt` con `[ ]`, o usar `[[ ]]` donde `&gt;` sí funciona para strings ASCII
+- `&lt;` y `&gt;` en strings comparan **orden alfabético ASCII**, no longitud: `"Apple" &lt; "Banana"` porque `'A'` (65) &lt; `'B'` (66)
+
+**Comillas dobles en variables de string:**
+```bash
+if [ "$1" != "HackTheBox" ]   #  comillas: bash trata el contenido como string
+if [ $1 != HackTheBox ]       #  sin comillas: errores si hay espacios/caracteres especiales
+```
+
+**File operators (recon y validación de archivos):**
+
+|Operador|Qué prueba|
+|---|---|
+|`-e`|el archivo/directorio existe|
+|`-f`|es un archivo regular|
+|`-d`|es un directorio|
+|`-L`|es un symlink|
+|`-r` / `-w` / `-x`|permisos read/write/execute|
+|`-s`|tamaño mayor que 0 (no vacío)|
+|`-O`|el usuario actual es dueño|
+|`-G`|el grupo del archivo coincide con el usuario actual|
+|`-N`|archivo modificado después de la última lectura|
+
+```bash
+if [ -e "$1" ]; then
+    echo "El archivo existe"
+elif [ ! -e "$1" ]; then   # ! = negación lógica
+    echo "No existe"
+fi
+```
+
+**Boolean / Logical operators:**
+
+|Operador|Significado|
+|---|---|
+|`!`|NOT (negación)|
+|`&&`|AND (ambas condiciones)|
+|`\|`|OR (una u otra)|
+
+bash
+
+```bash
+# Ambas deben cumplirse: archivo existe Y se puede leer
+if [[ -e "$1" && -r "$1" ]]; then
+    echo "Existe y tenemos permiso de lectura"
+fi
+```
+
+**La diferencia crucial: `[ ]` vs `[[ ]]`**
+
+|Feature|`[ ]` (test)|`[[ ]]` (bash builtin)|
+|---|---|---|
+|`<`, `>` para strings|X (interpretado como redirección)|✔|
+|`&&`, `\|` dentro|X (usa `-a`, `-o`)|✔|
+|Pattern matching (`*`)|X|✔|
+|Regex (`=~`)|X|✔|
+
