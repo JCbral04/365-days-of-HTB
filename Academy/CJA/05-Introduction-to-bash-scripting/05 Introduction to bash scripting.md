@@ -352,3 +352,307 @@ hosts=$(host $domain | grep "has address" | cut -d" " -f4 | tee discovered_hosts
 
 - Un script de enumeración puede tardar minutos. Con `>` solo, esperas en silencio sin saber si avanza o se colgó.
 - Con `tee`, **ves el progreso en tiempo real** y al mismo tiempo **queda guardado** para el reporte.
+
+### Flow Control - Loops (Bash Scripting 7/10)
+
+**Lo que ya sabía (repaso):**
+- `for` loop básico, iterar sobre una lista de valores
+- `while` loop , ejecutar ***mientras*** una condición sea verdadera
+- `break` — salir del loop por completo
+- La lógica del `CIDR.sh` (ya la desglosé en sección 5: el while con `stat` es un loop controlado por bandera que corre exactamente una vez)
+
+**Lo que NO sabía / no tenía claro:**
+
+**For loop en una sola línea (oneliner):**
+```bash
+for ip in 10.10.10.170 10.10.10.174;do ping -c 1 $ip;done
+```
+- El `;` separa comandos cuando están en la misma línea: `for ...; do ...; done`
+- Muy util en reverse shells donde cada línea es un comando independiente y no podemos pegar scripts multilinea fácilmente
+
+**`continue` vs `break`** diferencias importantes
+
+|Comando|Qué hace|Analogía|
+|---|---|---|
+|`break`|Sale del loop por completo|"Abortar misión"|
+|`continue`|Salta el resto de la iteración actual, pasa a la siguiente|"Saltar este host, siguiente"|
+
+En resumen `break` termina el bucle y `continue` pasa al siguiente bucle.
+```bash
+while [ $counter -lt 10 ]
+do
+    ((counter++))
+    if [ $counter == 2 ]; then continue; fi   # imprime 2 pero no ejecuta el resto
+    if [ $counter == 4 ]; then break; fi       # sale del loop, 4 es lo último que imprime
+    echo "Counter: $counter"
+done
+# Output: Counter: 1, Counter: 2, Counter: 3, Counter: 4
+```
+
+- Ojo: en el ejemplo del módulo, `continue` está ANTES del `echo`, entonces cuando `counter==2`, el `echo` de esa iteración no se ejecuta. En mi snippet de arriba el `echo` está después, por eso sí imprime 2. La posición del `continue` en el flujo importa.
+**Until loop — el hermano opuesto de while:**
+```bash
+until [ $counter -eq 10 ]
+do
+    ((counter++))
+    echo "Counter: $counter"
+done
+```
+- `while` corre **mientras** la condición sea **true**
+- `until` corre **hasta que** la condición sea **true** (es decir, mientras sea **false**)
+
+**Para qué sirve `until` en pentesting:** esperar a que un servicio esté disponible.
+
+```bash
+ntil nc -z 10.10.10.10 80; do sleep 1; done; echo "Puerto 80 abierto"
+```
+**La trampa de los loops anidados:**
+> "excessive combination of several loops in each other can make the code very unclear and lead to errors that can be hard to find"
+> 
+Esto me pasó mentalmente con el `CIDR.sh`: tiene for (hosts) → while (ping por host) → if (resultado del ping). Tres niveles de anidación. La regla práctica: si necesitas más de dos niveles, probablemente deberías extraer la lógica a una función.
+
+**Patrones útiles para mi arsenal:**
+**1. Ping sweep rápido (ya lo vimos, pero ahora entiendo el loop):**
+```bash
+for ip in 10.10.10.{1..254}; do ping -c 1 -W 1 $ip & done; wait
+```
+- `{1..254}` = brace expansion (bash genera 1 2 3 ... 254)
+- `&` = background: lanza 254 pings en paralelo
+- `wait` = espera a que terminen todos los background jobs
+**2. Port scan básico con bash puro:**
+```bash
+for port in 22 80 443 445 3389; do
+    timeout 1 bash -c "echo > /dev/tcp/10.10.10.10/$port" 2>/dev/null && echo "$port open"
+done
+```
+**3. Fuerza bruta de directorios web:**
+```bash
+for dir in $(cat wordlist.txt); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" http://10.10.10.10/$dir)
+    if [ "$code" == "200" ]; then echo "Found: /$dir"; fi
+done
+```
+
+### Flow Control - Branches: Case Statements (Bash Scripting 8/10)
+
+**Lo que ya sabía (repaso):**
+- `case` es el equivalente a `switch-case` de C/C#/Java — compara una variable contra patrones exactos
+- Sintaxis: `case $var in pattern) comandos ;; esac`
+- `*)` = default/wildcard (cualquier otro valor)
+- Ya lo usé en el menú interactivo de la sección 6 (`read` + `case`)
+
+**Lo que NO sabía / no tenía claro:**
+
+**Limitación clave de `case`: solo compara por IGUALDAD exacta**
+- `if` puede evaluar cualquier expresión booleana: `[ $x -gt 10 ]`, `[[ $str =~ regex ]]`
+- `case` solo hace: `$var == "patrón"` — no puedes usar `>`, `<`, `-gt`, `-lt`
+
+**Patrones en `case` admiten wildcards (globbing):**
+```bash
+case $respuesta in
+    [Yy] | [Yy][Ee][Ss]) echo "Sí" ;;     # Y, y, YES, yes, Yes...
+    [Nn] | [Nn][Oo]) echo "No" ;;           # N, n, NO, no, No...
+    *) echo "Respuesta inválida" ;;
+esac
+```
+
+- `|` = OR lógico entre patrones
+- `[Yy]` = cualquier carácter dentro de los corchetes
+
+**Doble semicolumna `;;` vs punto y coma `;`:**
+
+- `;;` = termina el bloque de ese patrón y sale del `case`
+- `;&` = ejecuta el siguiente patrón también (fall-through, raro)
+- `;;&` = evalúa el siguiente patrón (disponible en bash 4+, rarísimo)
+
+**Cuándo usar `case` vs `if-elif-else`:**
+
+|Situación|Usar|
+|---|---|
+|Comparar una variable contra valores discretos|`case`|
+|Rangos numéricos, regex, condiciones complejas|`if`|
+|Menús de opciones 1, 2, 3...|`case` (más limpio)|
+
+**El patrón del `CIDR.sh` revisitado:**
+
+```bash
+case $opt in
+    "1") network_range ;;
+    "2") ping_host ;;
+    "3") network_range && ping_host ;;
+    "*") exit 0 ;;
+esac
+```
+
+- `"3") network_range && ping_host` = ejecuta `network_range`, y SI tiene éxito (exit code 0), ejecuta `ping_host`. Si `network_range` falla, `ping_host` no corre.
+
+
+### Functions (Bash Scripting 9/10)
+
+**Lo que ya sabía (repaso):**
+- `function nombre { ... }` y `nombre() { ... }` — dos formas de definir funciones
+- Las funciones se definen ANTES de ser llamadas (procesamiento top-to-bottom)
+- Parámetros `$1`-`$9` dentro de la función funcionan igual que en scripts
+- `return` devuelve un exit code (0 = éxito, 1 = error)
+
+**Lo que NO sabía / no tenía claro:**
+
+**Variables globales por DEFECTO en bash:**
+```bash
+function cambia_valor {
+    var="modificado"     # modifica la variable GLOBAL del script principal
+}
+var="original"
+cambia_valor
+echo $var              # "modificado"
+```
+
+- En C, Python, JavaScript las variables de función son locales por defecto
+- En bash es al revés: **todas son globales a menos que uses `local`**
+- Esto es una trampa silenciosa: puedes sobrescribir variables del script principal sin darte cuenta
+```bash
+function segura {
+    local var="local"   # solo existe dentro de esta función
+    echo $var
+}
+```
+**Diferencia entre `return`, `echo`, y variable en funciones bash:**
+
+|Método|Uso|Limitación|
+|---|---|---|
+|`return N`|exit code (0-255)|solo números, máximo 255|
+|`echo`|devolver texto|captura TODO el stdout de la función|
+|variable global|modificar estado|side effects, acoplamiento|
+
+```bash
+# Capturar output de función con echo
+function get_ip {
+    echo "10.10.10.10"
+}
+target=$(get_ip)        # target = "10.10.10.10"
+```
+
+```bash
+# Verificar exit code con return
+function check_root {
+    if [ $(id -u) -eq 0 ]; then
+        return 0          # éxito
+    else
+        return 1          # fallo
+    fi
+}
+check_root && echo "Soy root" || echo "No soy root"
+```
+
+**Return codes comunes (tabla del módulo):**
+
+|Código|Significado|
+|---|---|
+|0|Éxito|
+|1|Error general|
+|2|Mal uso de builtins|
+|126|Comando no ejecutable|
+|127|Comando no encontrado|
+|130|Script terminado por Ctrl+C (`128 + 2`)|
+|255|Exit status fuera de rango|
+
+**El patrón `$?` se lee INMEDIATAMENTE después de la función:**
+```bash
+given_args "argument"
+echo $?                 # 0 (éxito)
+
+content=$(given_args "argument")
+echo $?                 # 0 (exit code del command substitution)
+echo "$content"         # "Number of arguments: 1"
+```
+
+**Trampa con `$(función)`:** si la función hace `echo` y `return`, `$( )` captura SOLO el stdout. El `return` queda en `$?` pero no en la variable.
+
+```bash
+content=$(given_args "argument")
+# content = "Number of arguments: 1"  (lo que echo imprimió)
+# $? = 0  (lo que return devolvió)
+```
+
+**Cada función tiene su propio `$1`, `$2`, etc.:**
+
+- No colisionan con los argumentos del script principal
+- `network_range` puede usar `$1` y el script que la llama también tiene su `$1` — son diferentes scopes
+
+**Para mi script `scan.sh` futuro:**
+```bash
+#!/bin/bash
+
+function scan_host {
+    local target=$1
+    local ports=$2
+    nmap -sV -p "$ports" "$target"
+}
+
+function brute_dirs {
+    local target=$1
+    local wordlist=$2
+    while read dir; do
+        # ... curl a cada directorio
+    done < "$wordlist"
+}
+
+# Menú principal
+case $opt in
+    "1") scan_host "$target" "22,80,443" ;;
+    "2") brute_dirs "$target" "common.txt" ;;
+esac
+```
+
+### Debugging (Bash Scripting 10/10)
+
+**Lo que ya sabía (repaso):**
+- `echo` variables intermedias = debugging manual (mi forma de resolver el ejercicio del base64)
+- Exit codes (`$?`) para verificar si un comando falló
+- Errores de sintaxis bash se detectan al ejecutar el script
+
+**Lo que NO sabía / no tenía claro:**
+
+**`bash -x script.sh` — xtrace (modo debug):**
+```bash
+bash -x CIDR.sh
+```
+
+- Muestra CADA comando antes de ejecutarlo, precedido por `+`
+- Sustituye variables por sus valores reales: `+ '[' 0 -eq 0 ']'`
+- Es el equivalente a poner `echo` antes de cada línea, pero automático
+```bash
++ '[' 0 -eq 0 ']'
++ echo -e 'You need to specify the target domain.\n'
+You need to specify the target domain.
+```
+**`bash -v script.sh` — verbose (modo detallado):**
+```bash
+bash -v CIDR.sh          # muestra cada línea del código ANTES de ejecutarla
+bash -x -v CIDR.sh       # COMBINACIÓN: primero muestra la línea del código (-v), luego el debug con valores sustituidos (-x)
+```
+
+|Opción|Qué muestra|Cuándo usar|
+|---|---|---|
+|`-x`|Comando con variables sustituidas (runtime)|Saber QUÉ valores se están usando|
+|`-v`|Código fuente de cada línea (source)|Saber QUÉ línea del script se ejecuta|
+|`-x -v`|Ambas: source + runtime|Debugging profundo, trazabilidad completa|
+
+**Uso dentro del script (shebang):**
+```bash
+#!/bin/bash -x
+# todo el script corre en modo debug
+```
+O para una sección específica:
+```bash
+set -x          # activa debug
+# ... código sospechoso ...
+set +x          # desactiva debug
+```
+**Conexión con mi ejercicio del base64:** podría haber ahorrado tiempo usando `bash -x`:
+
+```bash
+bash -x script.sh
+# habría visto inmediatamente que `echo "$var"` añadía un \n antes del pipe a base64
+```
+
