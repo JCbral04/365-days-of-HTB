@@ -242,3 +242,113 @@ fi
 |Pattern matching (`*`)|X|✔|
 |Regex (`=~`)|X|✔|
 
+### Arithmetic (Bash Scripting 5/10)
+
+**Lo que ya sabía (repaso):**
+- `+`, `-`, `*`, `/`, `%` — operadores aritméticos básicos (mismo sentido que en cualquier lenguaje)
+- `variable++` / `variable--` — incremento/decremento (visto en C, JavaScript, etc.)
+- `${#variable}` — longitud de string (ya lo usé en el ejercicio del base64: `${#var} -gt 113450`)
+
+**Lo que NO sabía / no tenía claro:**
+
+**Sintaxis de aritmética en Bash: `$(( ))`**
+```bash
+echo $((10 + 10))     # 20
+echo $((10 / 10))     # 1
+echo $((10 % 4))      # 2 (resto de la división)
+```
+
+- **Sin `$(( ))`** bash interpreta todo como strings: `echo 10 + 10` → imprime literalmente "10 + 10"
+- **Dentro de `$(( ))`** no necesitas `$` para las variables: `echo $((increase++))` funciona; `echo $(($increase++))` también pero es redundante
+
+**El patrón del `CIDR.sh` del módulo :**
+```bash
+while [ $stat -eq 1 ]
+do
+    ping -c 2 $host > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        ((stat--))        # decremento: sale del while
+        ((hosts_up++))     # contador de hosts activos
+        ((hosts_total++))  # contador total
+    else
+        ((stat--))         # decremento igual: sale del while aunque esté down
+        ((hosts_total++))
+    fi
+done
+```
+**La lógica del while:** `stat=1` → entra al while → hace ping → sin importar si fue up o down, `((stat--))` lo deja en 0 → la condición `[ $stat -eq 1 ]` falla → sale del while. Es un while que corre **exactamente una vez** por host, controlado por la bandera `stat`. No es un while "infinito" como parece a primera vista.
+
+**Diferencia clave:**
+
+|Sintaxis|Qué evalúa|Contexto|
+|---|---|---|
+|`$(( ))`|expresión aritmética|devuelve el resultado numérico|
+|`(( ))`|expresión aritmética|**exit code** (0 = resultado ≠ 0, 1 = resultado = 0)|
+
+```bash
+if (( 5 > 3 )); then echo "sí"; fi   # funciona: exit code 0 = true
+if (( 0 )); then echo "sí"; fi       # no entra: 0 = false en aritmética
+```
+
+
+### Input and Output (Bash Scripting 6/10)
+
+**Lo que ya sabía (repaso):**
+- Redirecciones: `>` (sobrescribir), `>>` (append), `2>&1` (stderr a stdout) — del módulo Linux Fundamentals
+- Pipes (`|`) — conectar output de un comando al input de otro
+- Variables y funciones — ya los domino de secciones anteriores
+
+**Lo que NO sabía / no tenía claro:**
+
+**Input interactivo: `read`**
+```bash
+read -p "Select your option: " opt
+```
+
+- `-p` = **prompt**: muestra el mensaje y espera input en la **misma línea** (sin salto de línea)
+- El input del usuario se guarda en la variable `opt`
+- Sin `-p`: `echo "Select:"; read opt` — dos líneas, más feo
+
+**Patrón de menú interactivo (del `CIDR.sh`):**
+Se usa como un switch case para seleccionar una u otra opcion
+```bash
+echo -e "Additional options available:"
+echo -e "\t1) Identify network range."
+echo -e "\t2) Ping discovered hosts."
+echo -e "\t3) All checks."
+echo -e "\t*) Exit.\n"
+
+read -p "Select your option: " opt
+
+case $opt in
+    "1") network_range ;;
+    "2") ping_host ;;
+    "3") network_range && ping_host ;;
+    "*") exit 0 ;;
+esac
+```
+- `\t` = tabulación (indenta el menú)
+- `case` ejecuta la función correspondiente según el número ingresado
+- `*)` = wildcard: cualquier otra cosa → salir
+
+**Output Control: `tee` (la joya de esta sección)**
+
+|Comando|Qué hace|¿Ves en pantalla?|¿Guarda en archivo?|
+|---|---|---|---|
+|`cmd > file`|redirección|X|✓ (sobrescribe)|
+|`cmd >> file`|redirección append|X|✓ (agrega)|
+|`cmd \| tee file`|tee|✓|✓ (sobrescribe)|
+|`cmd \| tee -a file`|tee append|✓|✓ (agrega)|
+
+```bash
+# Ejemplo del CIDR.sh: whois muestra en pantalla Y guarda en CIDR.txt
+netrange=$(whois $ip | grep "NetRange\|CIDR" | tee -a CIDR.txt)
+
+# Otro ejemplo del CIDR.sh: descubrimiento de hosts
+hosts=$(host $domain | grep "has address" | cut -d" " -f4 | tee discovered_hosts.txt)
+```
+
+**Por qué `tee` es superior a redirección pura en scripts largos:**
+
+- Un script de enumeración puede tardar minutos. Con `>` solo, esperas en silencio sin saber si avanza o se colgó.
+- Con `tee`, **ves el progreso en tiempo real** y al mismo tiempo **queda guardado** para el reporte.
