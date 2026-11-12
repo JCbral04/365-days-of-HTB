@@ -136,14 +136,14 @@ tree c:\ /f | more      # todos los archivos, paginado
 
 **NTFS vs FAT32 — diferencias críticas:**
 
-| Feature | NTFS | FAT32 |
-|---|---|---|
-| Tamaño máximo archivo | 16 EB (teórico) | 4 GB |
-| Permisos granulares | **✓** ACLs | X Ninguno |
-| Journaling | **✓** (log de cambios) | X |
-| Compresión nativa | **✓** | X |
-| Encripción nativa | **✓** EFS | X |
-| Recuperación tras fallo | **✓** | X |
+| Feature                 | NTFS                   | FAT32     |
+| ----------------------- | ---------------------- | --------- |
+| Tamaño máximo archivo   | 16 EB (teórico)        | 4 GB      |
+| Permisos granulares     | **✓** ACLs             | X Ninguno |
+| Journaling              | **✓** (log de cambios) | X         |
+| Compresión nativa       | **✓**                  | X         |
+| Encripción nativa       | **✓** EFS              | X         |
+| Recuperación tras fallo | **✓**                  | X         |
 
 **Journaling en NTFS:** registra adición, modificación y eliminación de archivos. Esto es oro forense — puedes ver QUÉ cambió y CUÁNDO, incluso si el atacante borró logs.
 
@@ -565,3 +565,253 @@ Get-ACL -Path HKLM:\System\CurrentControlSet\Services\wuauserv | Format-List
 |Network Service Account|`NT AUTHORITY\NetworkService`|Similar al Local Service localmente, pero tipo cuenta de dominio estándar|Sesiones autenticadas para servicios de red|
 
 - Dato clave: `SYSTEM` **supera en privilegios a los administradores locales** — eso explica por qué en CTFs buscamos escalar a SYSTEM.
+
+### Interacting with the Windows Operating System (Windows Fundamentals 9/15)
+
+#### Lo que ya sabía (repaso)
+
+- GUI: interfaz gráfica punto y clic, introducida por Xerox PARC a finales de los 70 y adoptada por Apple y Microsoft.
+- RDP: protocolo propietario de Microsoft para conexión remota con GUI, usa el puerto **3389**.
+    
+
+#### Lo que NO sabía / no tenía claro
+
+- La línea de comandos en Windows tiene dos vías principales: **CMD** y **PowerShell**, y es la forma de automatizar tareas administrativas (ej: crear muchos usuarios de dominio a la vez).
+- El **Windows Command Reference** de Microsoft es la referencia A-Z oficial recomendada para comandos.
+- Algunos comandos tienen su propio menú de ayuda con `/?` (ej: `ipconfig /?`), además del `help <comando>` general.
+- PowerShell está construido sobre **.NET Framework**, lo que lo hace mucho más poderoso que CMD para interactuar con el OS directamente.
+- Los **cmdlets** siguen la forma `Verb-Noun` (ej: `Get-ChildItem`), y con `<cmdlet> -` + Tab se autocompletan los argumentos.
+- La ayuda de PowerShell **no viene instalada por defecto**: hay que correr `Update-Help` o usar `Get-Help <cmdlet> -Online`.
+- El **PowerShell ISE** permite escribir y depurar scripts en la misma consola.
+- Un script puede correrse directo (`.\PowerView.ps1`) o **importarse como módulo** (`Import-Module .\PowerView.ps1`) para tener sus funciones disponibles en la sesión.
+
+**Execution Policy** — tabla de políticas:
+
+|Policy|Descripción|Nota|
+|---|---|---|
+|AllSigned|Todos los scripts corren si están firmados por un editor de confianza|Prompt si el editor no está clasificado|
+|Bypass|Nada se bloquea, sin advertencias||
+|Default|Restricted en desktops, RemoteSigned en servers||
+|RemoteSigned|Scripts descargados de internet requieren firma digital; los locales no||
+|Restricted|Solo comandos individuales; bloquea .ps1, .ps1xml, .psm1, .ps1|Default en desktops|
+|Undefined|Sin política en ese scope|Si todo es Undefined → Restricted|
+|Unrestricted|Permite scripts sin firmar con advertencia si no son de intranet|Default en no-Windows|
+
+- Trampa clave: la execution policy **no es un control de seguridad real** — se puede evitar escribiendo el contenido del script directo, con comandos encodeados, o cambiando el scope Process (`Set-ExecutionPolicy Bypass -Scope Process`), que casi cualquier usuario puede hacer sin permisos de admin y solo dura la sesión.
+
+### Windows Management Instrumentation (WMI) (Windows Fundamentals 10/15)
+
+#### Lo que ya sabía (repaso)
+
+- WMI es un subsistema de Windows (no de PowerShell, ojo — viene preinstalado desde Windows 2000) para administración y monitoreo de sistemas, local o remoto.
+- Es un objetivo tanto para blue team como para red team: permite enumeración, ejecución de código y movimiento lateral.
+
+#### Lo que NO sabía / no tenía claro
+
+- Los componentes internos de WMI y cómo se conectan entre sí:
+
+|Componente|Descripción|
+|---|---|
+|WMI service|Proceso que corre al boot; intermediario entre providers, repositorio y aplicaciones|
+|Managed objects|Cualquier componente lógico o físico gestionable por WMI|
+|WMI providers|Monitorean eventos/datos de un objeto específico|
+|Classes|Pasan datos de los providers al servicio WMI|
+|Methods|Acciones sobre las clases (ej: iniciar/detener procesos remotos)|
+|WMI repository|Base de datos con los datos estáticos de WMI|
+|CIM Object Manager|Solicita datos a los providers y los devuelve a quien los pide|
+|WMI API|Permite a las aplicaciones acceder a la infraestructura WMI|
+|WMI Consumer|Envía queries a los objetos vía CIM Object Manager|
+
+- **WMIC está deprecado** (el propio `/?` lo advierte), pero sigue siendo útil conocerlo: funciona desde CMD, con aliases + verbos + adverbios + switches (ej: `list brief` da solo propiedades clave). 
+- En PowerShell se usa `Get-WmiObject` para instancias de clases (también remoto) e `Invoke-WmiMethod` para ejecutar métodos de objetos WMI. 
+- `ReturnValue: 0` indica que el método se ejecutó correctamente.
+
+### Microsoft Management Console (MMC) (Windows Fundamentals 11/15)
+
+#### Lo que ya sabía (repaso)
+
+- MMC existe desde Windows Server 2000 y corre en todas las versiones de Windows.
+- Sirve para agrupar herramientas administrativas (snap-ins) y gestionar hardware, software y red, local o remoto.
+
+#### Lo que NO sabía / no tenía claro
+
+- MMC funciona con **snap-ins**: el admin arma una consola personalizada con solo las herramientas que necesita.
+- Al agregar un snap-in hay que elegir si administra la **máquina local** u **otra computadora de la red** (snap-ins funcionan remotos también).
+- El conjunto de snap-ins se guarda como archivo **.msc**, que carga toda la vista la próxima vez que se abre MMC.
+- Por defecto los .msc se guardan en **Windows Administrative Tools** del menú Inicio.
+- Se pueden crear consolas personalizadas y **distribuirlas a otros usuarios**.
+
+### Windows Subsystem for Linux (WSL) (Windows Fundamentals 12/15)
+
+#### Lo que ya sabía (repaso)
+
+- WSL permite correr binarios de Linux nativamente en Windows 10 y Windows Server 2019.
+- Pensado para desarrolladores que necesitan Bash, Ruby y herramientas nativas de Linux (sed, awk, grep) directo en Windows.
+
+#### Lo que NO sabía / no tenía claro
+
+- **WSL2** (mayo 2019) trajo un kernel de Linux real usando un subset de features de Hyper-V. WSL1 no tenía kernel real.
+- Se instala como feature de Windows vía PowerShell con admin:
+
+
+```powershell
+# 1. Habilitar la feature de WSL
+Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux
+```
+
+- Luego se descarga una distro desde la Microsoft Store o se instala manualmente desde línea de comandos.
+- WSL instala `bash.exe`: con solo escribir `bash` en cualquier consola de Windows se obtiene una shell de Linux completa (con `uname -a` que muestra el kernel `-Microsoft`).
+- El **puente entre mundos**: desde WSL se accede a los volúmenes de Windows (incluido C:) vía el directorio `/mnt`.
+- Desde la shell de WSL se opera como en cualquier Linux: comandos, updates, paquetes.
+
+### Desktop Experience vs. Server Core (Windows Fundamentals 13/15)
+
+#### Lo que ya sabía (repaso)
+- **Server Core**: versión minimalista de Windows Server, lanzada con Server 2008, sin GUI.
+- Ventajas: menor uso de disco/memoria, menor superficie de ataque, menos requisitos de gestión.
+- En Server Core toda la administración se hace por línea de comandos, PowerShell, o remotamente con MMC/RSAT.
+
+#### Lo que NO sabía / no tenía claro
+
+- Server Core **sí soporta algunas herramientas gráficas**: Regedit, Notepad, System Information, Windows Installer, Task Manager, PowerShell, y parte de Sysinternals (AD Explorer, Process Explorer, Process Monitor, TCPView).
+- Desde **Server 2019** la elección Core vs Desktop Experience es al instalar y **no se puede revertir**.
+- **Sconfig**: interfaz de texto para setup inicial de Server Core — es en realidad un VBScript ejecutado por WScript. Sirve para red, updates, cuentas, activación, remote management.
+- Algunas apps **no corren en Server Core**: SCVMM 2019, System Center DPM 2019, SharePoint Server 2019, Project Server 2019.
+
+|Application|Server Core|Desktop Experience|
+|---|---|---|
+|Command prompt|✓|✓|
+|Windows PowerShell / .NET|✓|✓|
+|Regedit|✓|✓|
+|Taskmgr|✓|✓|
+|Remote Desktop Services|✓|✓|
+|Diskmgmt.msc|X|✓|
+|Server Manager|X|✓|
+|Mmc.exe|X|✓|
+|Eventvwr|X|✓|
+|Services.msc|X|✓|
+|Control Panel|X|✓|
+|Windows Explorer|X|✓|
+|Internet Explorer / Edge|X|✓|
+
+- Conclusión clave: Core = más liviano y seguro pero curva de aprendizaje más empinada; la elección depende del negocio y del skill del admin.
+
+### Windows Security (Windows Fundamentals 14/15)
+
+#### Lo que ya sabía (repaso)
+- Windows tiene una superficie de ataque enorme: muchas apps integradas y capas de configuración → es fácil que un sistema **totalmente parchado esté mal configurado** y sea vulnerable.
+- Conceptos generales: SID como identificador único, ACL/ACE para permisos, UAC con prompt de consentimiento, Registry como base de datos jerárquica de configuración, AppLocker como whitelisting de Microsoft, y Windows Defender como AV integrado.
+
+#### Lo que NO sabía / no tenía claro
+
+**SID** — estructura completa de `S-1-5-21-xxx-yyy-zzz-1002`:
+
+| Parte | Significado |
+|---|---|
+| `S` | Identifica el string como SID |
+| `1` | Revision level (nunca ha cambiado) |
+| `5` | Identifier authority (48-bit: quién creó el SID) |
+| `21` | Subauthority1: relación del usuario/grupo con la autoridad |
+| `674899381-4069889467-2080702030` | Subauthority2: qué computadora o dominio creó el SID |
+| `1002` | Subauthority3 = **RID**: distingue la cuenta (usuario normal, guest, admin...) |
+
+- En AD, el SID incluye además el **domain SID**.
+- Dos usuarios idénticos son distinguibles por su SID (se generan automáticamente).
+
+**SAM, ACE y ACL**
+- **SAM** otorga derechos de red para ejecutar procesos específicos.
+- Los derechos se gestionan con **ACEs dentro de ACLs**; cada objeto securable tiene un **security descriptor** con dos tipos de ACL:
+  - **DACL** — define quién tiene acceso (Discretionary)
+  - **SACL** — auditing (System)
+- Cada hilo/proceso iniciado por un usuario pasa por autorización: el **access token** (que contiene el SID) es validado por el **LSA** (Local Security Authority).
+- Dato clave: entender esto es esencial para la fase de **privilege escalation**.
+
+**UAC**
+- Admin Approval Mode: previene instalaciones/manipulaciones sin consentimiento del admin.
+- El prompt interrumpe ejecución de scripts/binarios maliciosos hasta confirmación o password de admin.
+
+**Registry**
+- Jerarquía: root keys (`HKEY_*`, abreviadas HKLM, HKCU...) → subkeys → values. Se abre con `regedit`.
+- 11 tipos de valores; los más relevantes:
+
+| Tipo | Descripción |
+|---|---|
+| `REG_SZ` | String null-terminated (Unicode o ANSI) |
+| `REG_EXPAND_SZ` | String con variables sin expandir (`%PATH%`) |
+| `REG_DWORD` | Número de 32-bit (little-endian en Windows) |
+| `REG_QWORD` | Número de 64-bit |
+| `REG_BINARY` | Datos binarios |
+| `REG_MULTI_SZ` | Secuencia de strings null-terminated |
+
+- **HKLM** contiene 6 subkeys cargadas al boot: SAM, SECURITY, SYSTEM, SOFTWARE, HARDWARE (dinámica), BCD.
+- Hives del sistema: `C:\Windows\System32\Config\` (archivos SAM, SECURITY, SYSTEM, SOFTWARE, etc.)
+- Hive del usuario: `C:\Users\<USER>\NTUSER.DAT` (HKCU), oculto.
+
+**Run y RunOnce keys**
+- 4 claves clave para persistencia/mantenimiento de acceso:
+
+```
+HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunOnce
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce
+```
+
+- `RunOnce` ejecuta una sola vez; `Run` en cada logon/boot.
+
+**Whitelisting vs Blacklisting**
+- Whitelist = zero trust: todo es "malo" salvo lo explícitamente permitido; menos overhead que blacklist (no hay que actualizar constantemente).
+- Recomendado por NIST en entornos de alta seguridad.
+- Mejor práctica: **modo auditoría primero** para no bloquear apps por omisión.
+
+**AppLocker**
+- Desde Windows 7; controla qué pueden ejecutar los usuarios: ejecutables, scripts, MSI, DLLs, packaged apps.
+- Reglas por: publisher (firma digital), product name, file name, versión, ruta, **hash**. Aplicables a grupos o usuarios.
+
+**Local Group Policy**
+- `gpedit.msc` → Computer Configuration y User Configuration.
+- En dominio, los GPOs se empujan desde el DC; local sirve también en máquinas no unidas a dominio.
+- Ejemplo clave: habilitar **Credential Guard** (Turn On Virtualization Based Security) — aísla el proceso LSA contra robo de credenciales.
+
+**Windows Defender**
+- Gratis e integrado desde Vista/Server 2008; renombrado con el Creators Update de Windows 10.
+- Features: real-time protection, cloud-delivered protection (sube muestras; el archivo queda "locked" hasta el análisis), **Tamper Protection** (bloquea cambios de settings vía Registry, PowerShell o GPO).
+- **Controlled folder access** = protección anti-ransomware integrada. Se pueden agregar exclusiones (ej: carpeta de tools de pentesting para que no los cuarentene).
+- `Get-MpComputerStatus` → ver qué protecciones están activas (en CMD filtrar con `findstr "True"`).
+- Detecta payloads de Metasploit y Mimikatz sin alterar.
+- Se puede bypassar aun con la última versión y definiciones al día — pero cada vez es más difícil.
+
+### Skills Assessment - Windows Fundamentals (Windows Fundamentals 15/15)
+
+#### Lo que ya sabía (repaso)
+- Permisos efectivos = **Share Permissions AND NTFS permissions** (la más restrictiva gana).
+- Buenas prácticas: grupos de seguridad en vez de usuarios sueltos, mínimo privilegio, quitar grupos default ("Everyone"/"Users").
+
+#### Lo que NO sabía / no tenía claro
+- El orden importa: **Disable Inheritance** antes de asignar permisos específicos, si no las ACEs heredadas pisan o mezclan con las nuevas.
+- Share permissions son toscos (Full Control / Change / Read); NTFS permite granularidad (Modify, R&E, List, Read, Write).
+- `lusrmgr.msc` centraliza usuarios y grupos locales; `Jim` con "User must change password at next logon" desmarcado.
+- La doble capa NTFS en la subcarpeta HR: aunque herede de `Company Data`, se repite la configuración para reforzar el aislamiento del contenido confidencial.
+
+#### Pasos de la demo (resumen ejecutado)
+
+```powershell
+# 1. Crear carpeta compartida "Company Data" y subcarpeta "HR" (Explorador, GUI)
+# 2. Crear usuario Jim (lusrmgr.msc → Users → New User, desmarcar cambio de password)
+# 3. Crear grupo HR (lusrmgr.msc → Groups → New Group)
+# 4. Agregar Jim al grupo HR
+# 5. Share permissions de Company Data: quitar default, HR con Change + Read
+# 6. NTFS de Company Data: Disable inheritance → quitar default → HR con Modify, R&E, List, Read, Write
+# 7. NTFS de subcarpeta HR: mismo procedimiento del paso 6
+# 8. Listar detalles de un servicio con PowerShell
+```
+
+Paso 8 (servicio):
+
+```powershell
+# 1. Listar servicios con detalles clave (nombre, estado, cuenta)
+Get-Service | Select-Object Name, Status, StartType
+# 2. Ver la cuenta bajo la que corre (conecta con cuentas non-interactive)
+Get-WmiObject -Class Win32_Service | Select-Object Name, State, StartName
+```
+
