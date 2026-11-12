@@ -546,3 +546,22 @@ Get-ACL -Path HKLM:\System\CurrentControlSet\Services\wuauserv | Format-List
 - Muestra permisos en formato legible (no SDDL crudo)
 - También devuelve el SDDL en la propiedad `Sddl`
 - Incluye SIDs de security principals
+
+### Windows Sessions (Windows Fundamentals 8/15)
+
+#### Lo que ya sabía (repaso)
+- Sesión interactiva: un usuario autentica con credenciales de forma local o de dominio.
+- Se puede iniciar con logon directo, con `runas` (secondary logon) o por RDP.
+
+#### Lo que NO sabía / no tenía claro
+
+- Las cuentas **non-interactive** no requieren credenciales ni tienen password: Windows las usa para arrancar servicios y tareas programadas automáticamente.
+- Existen 3 tipos, con privilegios bien distintos entre sí.
+
+|Cuenta|Nombre|Privilegios|Uso|
+|---|---|---|---|
+|Local System Account|`NT AUTHORITY\SYSTEM`|La más poderosa del sistema, más que un admin local|Tareas del OS, arranque de servicios|
+|Local Service Account|`NT AUTHORITY\LocalService`|Similar a un usuario local, funcionalidad limitada|Puede iniciar algunos servicios|
+|Network Service Account|`NT AUTHORITY\NetworkService`|Similar al Local Service localmente, pero tipo cuenta de dominio estándar|Sesiones autenticadas para servicios de red|
+
+- Dato clave: `SYSTEM` **supera en privilegios a los administradores locales** — eso explica por qué en CTFs buscamos escalar a SYSTEM.
