@@ -29,7 +29,7 @@ Documento mi proceso de aprendizaje en ciberseguridad de forma pública: qué es
 ```
 Academy/
 ├── CJA/               ← notas teóricas por módulo
-└── academy-labs/      ← write-ups de labs prácticos
+└── labs/      ← write-ups de labs prácticos
 Cheatsheets/           ← comandos y referencia rápida
 Machines/              ← write-ups de máquinas (retiradas / Starting Point)
 ```
