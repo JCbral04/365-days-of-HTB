@@ -4,7 +4,7 @@
 > 
 **Día actual: 25/ 365** 
 
-![Progress](https://img.shields.io/badge/CJA%20path-35.5%25-orange)
+![Progress](https://img.shields.io/badge/CJA%20path-36.8%25-orange)
 
 ## ¿Por qué existe este repo?
 
@@ -20,10 +20,10 @@ Documento mi proceso de aprendizaje en ciberseguridad de forma pública: qué es
 | Linux Fundamentals | COMPLETADO |
 | Introduction to Bash Scripting | COMPLETADO |
 | Windows Fundamentals | COMPLETADO |
-| Windows Fundamentals | 🔵 en progreso (4.35%) |
+| # Introduction to Windows Command Line | 🔵 en progreso (21.74%) |
 
 
-**Path general: 35.5% completado**
+**Path general: 36.8% completado**
 
 ## Estructura
 ```
