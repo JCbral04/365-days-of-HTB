@@ -4,7 +4,7 @@
 > 
 **Día actual: 27/ 365** 
 
-![Progress](https://img.shields.io/badge/CJA%20path-36.8%25-orange)
+![Progress](https://img.shields.io/badge/CJA%20path-37.7%25-orange)
 
 ## ¿Por qué existe este repo?
 
@@ -20,10 +20,10 @@ Documento mi proceso de aprendizaje en ciberseguridad de forma pública: qué es
 | Linux Fundamentals | COMPLETADO |
 | Introduction to Bash Scripting | COMPLETADO |
 | Windows Fundamentals | COMPLETADO |
-| # Introduction to Windows Command Line | 🔵 en progreso (21.74%) |
+| # Introduction to Windows Command Line | 🔵 en progreso (34.78%) |
 
 
-**Path general: 36.8% completado**
+**Path general: 37.7% completado**
 
 ## Estructura
 ```
@@ -45,4 +45,4 @@ Machines/              ← write-ups de máquinas (retiradas / Starting Point)
 Todo el contenido es educativo y se practica exclusivamente en entornos autorizados (HTB Academy, TryHackMe, laboratorios propios). Nada de lo documentado aquí aplica a sistemas sin permiso explícito.
 
 ---
-*Software engineering student (7th semester) learning offensive security.*
+*Software engineering student (8th semester) learning offensive security.*

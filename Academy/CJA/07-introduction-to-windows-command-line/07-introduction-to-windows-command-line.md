@@ -158,3 +158,221 @@
 - `copy <origen> <destino>` — puede renombrar en destino; `/V` valida la copia
 - `move` — mueve y/o renombra (archivos y dirs)
 
+### Gathering System Information (Intro to Windows Command Line 6/23)
+
+#### Diagrama — Types of Information (Host Enumeration)
+```mermaid
+flowchart LR
+A((Types of Information)) --> B[General System Information]
+A --> C[Networking Information]
+A --> D[Basic Domain Information]
+A --> E[User Information]
+B --> B1[Hostname]
+B --> B2[OS Details]
+B2 --> B2a[Name]
+B2 --> B2b[Version]
+B2 --> B2c[Configuration]
+B --> B3[Installed Hotfixes and Patches]
+C --> C1[Host IP Address]
+C --> C2[Network Interfaces]
+C --> C3[Accessible Subnets]
+C --> C4[DNS Servers]
+C --> C5[Known Hosts]
+C --> C6[Network Resources]
+D --> D1[Active Directory Information]
+E --> E1[Local Users and Groups]
+E --> E2[Environment Variables]
+E --> E3[Currently Running Tasks]
+E --> E4[Scheduled Tasks]
+E --> E5[Known Services]
+```
+#### Explicación del diagrama
+
+El diagrama resume **qué buscar al enumerar durante un recon en un host Windows** (host enumeration). Al ganar acceso inicial se tiene acceso limitado y poco tiempo, por lo que no se puede revisar "todo"  se necesita un mapa de las 4 áreas de información que existen en cualquier sistema para ir directo a lo relevante.
+
+1. **General System Information** ¿dónde se está parado? Hostname, versión/configuración del SO y parches. Con versión + hotfixes se busca en ExploitDB si existe CVE conocido para escalada sin esfuerzo.
+2. **Networking Information** — _¿a qué redes se puede llegar?_ IP, interfaces, subnets, DNS y hosts ya contactados. El ARP cache y los DNS servers dibujan el mapa de la red interna sin escanear nada → próximos objetivos para movimiento lateral.
+3. **Basic Domain Information** — _¿el host pertenece a un dominio?_ En AD las credenciales valen para toda la red y los recursos viven en el dominio, no en la máquina local.
+4. **User Information** — _quién se es y qué se puede hacer._ Usuario, grupos, privilegios y lo accesible desde esa cuenta (variables de entorno, tareas, servicios). Rama más importante para **privilege escalation**: un privilegio Enabled inusual o un grupo custom puede ser la escalada completa.
+
+**Por qué importa:** evita enumerar a ciegas (cada comando con propósito), prioriza (no se necesita SYSTEM en cada host), es la base de PE/lateral movement/persistence, y sirve a ambos bandos (red y blue).
+
+#### Lo que ya sabía (repaso)
+
+- Host enumeration = recopilar info del sistema; sirve a red team (vectores de explotación) y blue team (diagnóstico, hardening).
+- `systeminfo`, `whoami`, `ipconfig`, `arp -a`, `net user` — los conceptos básicos de enumeración.
+
+#### Lo que NO sabía / no tenía claro
+
+**La metodología: preguntas guía antes de tocar el teclado** Enumerar sin estructura = horas perdidas mirando info que parece importante. El módulo propone 3 preguntas:
+
+1. ¿Qué información del sistema se puede sacar del target?
+2. ¿Con qué otros sistemas interactúa el target por la red?
+3. ¿A qué cuentas se tiene acceso y qué información da cada una?
+
+**Ejemplo "assumed breach"** (por qué enumerar a fondo): acceso inicial con cuenta sin privilegios → objetivo es escalar. Preguntas a responder:
+
+- ¿Qué cuenta se tiene? ¿A qué grupos pertenece?
+- ¿Qué privilegios tiene habilitados?
+- ¿A qué recursos de red accede?
+- ¿Qué tareas y servicios corren bajo esa cuenta?
+
+Clave del módulo: es fácil descartar un sistema como "totalmente parchado", pero así se pierden los **errores humanos de configuración**, que son la mayoría de los vectores reales. **Enumerar a fondo tiene prioridad sobre explotar rápido.**
+
+**Huella y detección (OPSEC):**
+
+- Menos comandos = menor huella. Un comando que da la misma info que tres siempre es mejor opción.
+- Conocer **varias formas de obtener la misma info** por si un comando específico está monitoreado.
+- Ruta por CMD es **ruidosa**: genera muchos logs, deja rastros en múltiples hosts, y no da visibilidad de qué ven el EDR/NIDS del objetivo.
+- Un usuario promedio ejecutando `cmd.exe` ya es sospechoso para un blue team; los comandos `net *` encienden alertas fácilmente con logging y monitoring bien configurados.
+
+**Comandos en detalle:**
+
+Casting a wide net:
+
+|Comando|Info|Nota|
+|---|---|---|
+|`systeminfo`|Hostname, OS, build, dominio, hotfixes — todo en uno|Primer comando al ganar acceso: lay of the land con huella mínima. Versión + parches → búsqueda directa en Google/ExploitDB|
+|`hostname`|Solo hostname|Alternativa si `systeminfo` está monitoreado|
+|`ver`|Solo versión de OS|Complementa a hostname|
+
+Scoping the network:
+
+|Comando|Info|Nota|
+|---|---|---|
+|`ipconfig`|DNS suffix, IPv4, subnet mask, gateway por adapter|Múltiples interfaces = múltiples redes (ej. + una interna) → pistas del entorno|
+|`ipconfig /all`|Todo lo anterior + MAC, DHCP, DNS servers por adapter|Vista completa de cada adapter|
+|`arp /a`|ARP cache: IP ↔ MAC de hosts contactados, por interfaz|Mapeo de red **pasivo** (sin escanear): los hosts dinámicos ya hablaron con el target|
+
+Understanding the current user:
+
+|Comando|Info|Nota|
+|---|---|---|
+|`whoami`|`DOMINIO\usuario` actual|Si no es domain-joined muestra NetBIOS/hostname|
+|`whoami /priv`|Privilegios con su estado Enabled/Disabled|Determina capacidades en el host; un usuario standard tiene casi todo Disabled. Cualquier privilegio extra habilitado = potencial escalada|
+|`whoami /groups`|Grupos del usuario (built-ins + custom)|Grupos custom con acceso explícito son pistas de escalada|
+|`whoami /all`|Todo lo anterior junto|Atajo cuando se necesita el panorama completo|
+
+Otras cuentas y grupos:
+
+|Comando|Info|Nota|
+|---|---|---|
+|`net user`|Lista usuarios locales (también crea/borra)|En redes pobladas = más cuentas para intentar comprometer|
+|`net group`|Grupos de dominio|**Solo contra un DC** — en otro host devuelve error|
+|`net localgroup`|Grupos locales del host|Funciona en cualquier host|
+
+Por qué importa en dominio:cualquier usuario del dominio puede loguearse en cualquier host físico sin cuenta local → revisar qué usuarios usaron el host actual es vector de persistencia entre máquinas.
+
+Recursos en la red:
+|Comando|Info|Nota|
+|---|---|---|
+|`net share`|Shares del host|Default: C,ADMIN , IPC$. Un share **manual** (ej. `Records` → D:\Important-Files) = posible mina de datos. Checklist al encontrar uno: ¿permisos? ¿lectura/escritura/ejecución? ¿data valiosa? Shares también sirven de staging para payloads y movimiento lateral|
+|`net view`|Recursos que el host conoce: domain resources, shares, impresoras|Búsqueda amplia del entorno|
+
+### Finding Files and Directories (Intro to Windows Command Line 7/23)
+
+#### Lo que ya sabía (repaso)
+
+- `where <archivo>` localiza binarios/archivos si están en el PATH (ej: `where calc.exe` → `C:\Windows\System32\calc.exe`).
+- `find` busca strings dentro de archivos o contra output de otro comando; no soporta wildcards.
+- Practicamente y escencia igual que buscar en linux pero con diferencias.
+
+#### Lo que NO sabía / no tenía claro
+
+**where**
+
+- Solo busca en el **PATH** por defecto → falla con archivos fuera de él (ej. un `.txt` en el user dir). Error típico: `INFO: Could not find files for the given pattern(s)`.
+- `/R <ruta>` → búsqueda **recursiva** por todo el hive de directorios: `where /R C:\Users\student\ bio.txt`
+- Acepta **wildcards**: `where /R C:\Users\student\ *.csv` → encuentra por tipo de archivo.
+
+**find (strings, no archivos)**
+
+- Busca una cadena dentro de un archivo o del output de otro comando.
+- Modificadores:
+    - `/V` → inversión (NOT): muestra las líneas que **no** contienen el string
+    - `/N` → muestra números de línea
+    - `/I` → ignora mayúsculas/minúsculas
+    - Combinado: `find /N /I /V "IP Address" example.txt` → líneas que NO tienen "IP Address", con números, sin importar case.
+- Limitación clave: **no acepta wildcards ni regex** → para eso existe findstr.
+
+**findstr (find 2.0 ≈ grep de Linux)**
+
+- Busca **patrones**: strings, regex, wildcards y más dentro de archivos.
+- El reemplazo robusto de find cuando se necesita matching más específico.
+
+**Comparación de archivos**
+
+|Comando|Qué compara|Output|Modificadores clave|
+|---|---|---|---|
+|`comp`|Byte por byte|Diferencias en decimal por default; muestra dónde empiezan|`/A` en formato ASCII (caracteres), `/L` con números de línea|
+|`fc`|Línea por línea (texto)|Bloques de líneas distintas entre archivo 1 y 2 — mucho más legible que comp|`/A` solo primera/última línea de cada diff, `/B` binario, `/C` ignora case, `/N` números de línea, `/U` Unicode, `/W` comprime espacios|
+
+- Caso de uso defensivo: verificar si **scripts, ejecutables o archivos críticos fueron modificados** (integridad).
+- Ejemplo comp: dos archivos con "a" → `Files compare OK`; al cambiar uno a "b" → `Compare error at OFFSET 2` con `/A` muestra `file1 = a / file2 = b`.
+
+**sort**
+- Entrada: consola, pipe (`|`, `<`) o archivo. Salida: consola, archivo (`/O`) u otro comando.
+- `sort .\file-1.md /O .\sort-1.md` → ordena alfabéticamente y escribe a archivo nuevo.
+- `/unique` → solo entradas únicas (elimina duplicados).
+- **Buena práctica**: antes de comparar listas/archivos con fc, ordenar primero — si no, cada línea coincide en posiciones distintas y la comparación no sirve.
+
+### Environment Variables (Intro to Windows Command Line 8/23)
+
+#### Lo que ya sabía (repaso)
+
+- Variables de entorno = settings globales del host, presentes en Windows/Linux/macOS pero con funcionamiento distinto en cada OS.
+- Se referencian con `%NOMBRE%`; en Windows no son case-sensitive, pueden tener espacios y números, pero **no pueden empezar con número ni contener `=`**.
+- Convención: mayúsculas + underscore (`%SYSTEMROOT%`).
+
+#### Lo que NO sabía / no tenía claro
+
+**Scope (dónde es accesible una variable)**
+
+- Concepto de programación: Global vs Local.
+- Ejemplo Alice/Bob: `%WINDIR%` es global (ambos la ven); si Alice hace `set SECRET=...`, Bob no la ve (`%SECRET%` se imprime literal y `set` dice "not defined").
+
+**Scopes en Windows (3):**
+
+|Scope|Descripción|Permisos|Registry location|
+|---|---|---|---|
+|**System (Machine)**|Variables del OS, globales para todos los usuarios, cargadas al runtime|Local/Domain Admin|`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`|
+|**User**|Variables del usuario activo, solo accesibles por él|Usuario activo, Local/Domain Admin|`HKCU\Environment`|
+|**Process**|Variables del proceso en ejecución, **volátiles** (mueren con el proceso); heredan de System/User y del proceso padre|Child/parent process o usuario activo|Ninguna (memoria del proceso)|
+
+**Ver variables: set vs echo**
+
+- `set` solo → imprime **todas** las variables del sistema.
+- `set %VAR%` → intento de mostrar una: da "not defined" si no se está asignando nada (sintaxis confusa, mejor echo).
+- `echo %VAR%` → imprime el valor de una variable. Sin features de edición.
+
+**set vs setx — cuándo usar cada uno**
+
+||`set`|`setx`|
+|---|---|---|
+|Alcance|Solo la sesión actual de CMD (process scope)|**Permanente**: escribe en el registry, persiste entre sesiones y reinicios|
+|Sintaxis crear/editar|`set VAR=valor`|`setx VAR valor` (sin `=`)|
+|Extra|—|Puede crear/modificar variables en otras máquinas del dominio|
+|Efecto inmediato|Sí|**No**: los cambios se ven al abrir una nueva sesión CMD (en remoto, en el próximo logon)|
+
+- Nota: la sintaxis de crear/editar/borrar es idéntica entre set y setx; solo cambia la persistencia.
+
+**Crear / editar / borrar**
+
+- Crear: `set DCIP=172.16.5.2` (sesión) o `setx DCIP 172.16.5.2` (permanente → `SUCCESS: Specified value was saved.`)
+- Validar: `echo %DCIP%`
+- Editar: volver a asignar con el nuevo valor (`setx DCIP 172.16.5.5`).
+- Borrar: **no hay delete directo** → se asigna valor vacío: `setx DCIP ""`. Luego `set DCIP` confirma "Environment variable DCIP not defined".
+
+**Variables importantes para enumeración (van en claro = mina de info)**
+
+|Variable|Qué da|Valor típico / uso|
+|---|---|---|
+|`%PATH%`|Directories donde buscar ejecutables||
+|`%OS%`|OS actual del workstation||
+|`%SYSTEMROOT%`|Carpeta del sistema (read-only, definida por el sistema)|`C:\Windows` — binarios core y configs|
+|`%LOGONSERVER%`|Servidor de logon del usuario activo + hostname|Sirve para saber si la máquina está en dominio o workgroup|
+|`%USERPROFILE%`|Home del usuario activo|`C:\Users\{username}`|
+|`%ProgramFiles%`|Programas x64|`C:\Program Files`|
+|`%ProgramFiles(x86)%`|Programas 32-bit bajo WOW64; **solo en hosts de 64-bit** → revela arquitectura del host|`C:\Program Files (x86)`|
+
+- Advertencia del módulo: las variables afectan el core del OS → **editar con extrema cautela**; para scripts/tools, crear una variable nueva antes que tocar una del sistema.
