@@ -376,3 +376,52 @@ Recursos en la red:
 |`%ProgramFiles(x86)%`|Programas 32-bit bajo WOW64; **solo en hosts de 64-bit** → revela arquitectura del host|`C:\Program Files (x86)`|
 
 - Advertencia del módulo: las variables afectan el core del OS → **editar con extrema cautela**; para scripts/tools, crear una variable nueva antes que tocar una del sistema.
+
+### Managing Services (Intro to Windows Command Line 9/23)
+
+#### Lo que ya sabía (repaso)
+
+- `sc` (Service Controller) comunica con el Service Control Manager para consultar, modificar y manejar servicios **local y remoto** (`\\ServerName`).
+- Otras herramientas que tocan servicios: WMIC y Tasklist.
+- `sc` sin parámetros muestra help con comandos: query, queryex, start, pause, stop, config, etc.
+
+#### Lo que NO sabía / no tenía claro
+
+**Query de servicios**
+
+- `sc query type= service` → enumera servicios Win32 activos (type= driver solo drivers; state= all incluye detenidos).
+-  **El espaciado en los parámetros es crítico**: solo `type= service` es válido; `type=service` o `type =service` son interpretados distinto y fallan.
+- Info que da: SERVICE_NAME, DISPLAY_NAME, TYPE (WIN32 / WIN32_OWN_PROCESS / WIN32_SHARE_PROCESS), **STATE** (1 STOPPED, 2 START_PENDING, 3 STOP_PENDING, 4 RUNNING), si es STOPPABLE/NOT_STOPPABLE, WIN32_EXIT_CODE, CHECKPOINT, WAIT_HINT.
+- Caso de uso del escenario del atacante: `sc query windefend` → Defender RUNNING pero `NOT_STOPPABLE` con permisos de usuario standard.
+
+**Stop/Start — la lección de los permisos**
+
+- `sc stop windefend` → `Access is denied.` (como usuario standard).
+- **Sorpresa clave: como Administrator TAMBIÉN da `Access is denied.`** → ciertos servicios (como windefend) están protegidos por encima de admin local; solo SYSTEM puede detenerlos.
+- Moral del módulo: **probar a ciegas llena los logs de errores** y dispara alertas de "usuario sin privilegios intentando tocar proceso protegido" → el blue team triangula y expulsa. Hay que conocer las restricciones antes de actuar.
+- Servicio sí detenible: Spooler → `sc query Spooler` (RUNNING, STOPPABLE) → `sc stop Spooler` → estado pasa a STOP_PENDING y luego STOPPED.
+- `sc start Spooler` → START_PENDING → RUNNING (tarda segundos en inicializar). Ojo: no todos los servicios responden a start/stop si otros servicios dependen de ellos.
+
+**Modificar servicios con sc config**
+
+- `sc config <servicio> start= disabled` → cambia el start type; se refleja en **registry + base de datos del SCM**.
+    
+- **Persistencia al reboot**: los cambios de config sobreviven reinicios → puede sacar un servicio permanentemente. Cautela.
+- Los cambios solo aplican full **después de reiniciar el servicio**.
+- Demo del módulo: deshabilitar Windows Update requiere **dos servicios**:
+    
+    - `wuauserv` (Windows Update) — usualmente STOPPED cuando no está actualizando
+    - `bits` (Background Intelligent Transfer) — corriendo; hay que `sc stop bits` primero
+    - Luego `sc config wuauserv start= disabled` y `sc config bits start= disabled` → `[SC] ChangeServiceConfig SUCCESS`
+    - Verificar: `sc start wuauserv` → `FAILED 1058: The service cannot be started, either because it is disabled...`
+    - Revertir: `sc config <svc> start= auto`
+- Beneficio para el atacante: el sistema queda sin recibir updates → exploits siguen funcionando. Costo: **ruidoso**, alertas seguras, requiere elevación casi siempre.
+    
+
+**Otras rutas para enumerar servicios**
+
+|Comando|Qué da|Nota|
+|---|---|---|
+|`tasklist /svc`|Procesos + PID + servicios hosteados bajo cada proceso|Rápido para ver qué proceso aloja qué servicio (ej: lsass.exe → KeyIso, SamSs, VaultSvc)|
+|`net start`|Lista de servicios activos (display names)|`net stop/pause/continue <svc>` funcionan similar a sc|
+|`wmic service list brief`|Todos los servicios (corriendo o no): Name, ProcessId, **StartMode** (Auto/Manual/Disabled), State, Status|Vista ideal de start modes; **WMIC está deprecado** — no depender de él|
