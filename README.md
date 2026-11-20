@@ -2,7 +2,7 @@
 
 > 365 días de aprendizaje continuo en hacking ético — write-ups y notas de mi progreso en **Hack The Box Academy** (path: Junior Cybersecurity Analyst)
 > 
-**Día actual: 29/ 365** 
+**Día actual: 30/ 365** 
 
 ![Progress](https://img.shields.io/badge/CJA%20path-37.7%25-orange)
 
