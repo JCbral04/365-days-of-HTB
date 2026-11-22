@@ -473,3 +473,96 @@ Recursos en la red:
 **Delete — borrar**
 - `schtasks /delete /tn <nombre>` → pide confirmación (Y/N).
 - `/f` → suprime la confirmación (y no pregunta).
+
+### CMD Vs. PowerShell (Intro to Windows Command Line 11/23)
+
+#### Lo que ya sabía (repaso)
+
+- PowerShell y CMD vienen nativos en Windows; casi todo comando de CMD funciona en PowerShell.
+- PowerShell corre Batch + cmdlets + aliases; CMD solo Batch.
+- Acceso: Windows Search, Windows Terminal, PowerShell ISE, o `powershell.exe` desde CMD (útil al ganar shell por CLI).
+
+#### Lo que NO sabía / no tenía claro
+
+**Diferencias clave (tabla del módulo):**
+
+|Feature|CMD|PowerShell|
+|---|---|---|
+|Lenguaje|Batch y comandos básicos|Batch + CMD + PS cmdlets + aliases|
+|Entre comandos|Output de texto: no pasa estructurado a otro comando|Output como **objeto estructurado** → comandos más sofisticados|
+|Output|Solo texto|Formato objeto|
+|Paralelismo|Un comando a la vez|Puede multi-thread/comandos en paralelo|
+
+- PowerShell = más que un CLI: **lenguaje de scripting**, open-source, corre también en Linux (gracias a .NET). Modelo de objetos en vez de texto.
+- Trade-off de OPSEC: la module import de PowerShell facilita traer tools, pero su **logging e historial son más potentes** → si no se necesitan sus capacidades y se busca stealth, mejor CMD.
+
+**Por qué importa (contexto admin/infosec):** PowerShell es estándar para sysadmins: provisionar servers, crear/gestionar cuentas y grupos de AD, shares, Azure/Entra, Exchange, automatización diaria. Entender ese contexto ayuda al pentester y al defensor.
+
+**El prompt:** `PS C:\Users\htb-student>` — PS indica PowerShell, luego el cwd. Casi idéntico a CMD.
+
+- Nota del módulo: **poco valor en memorizar comandos** — enfocarse en contexto, conceptos y posibilidades; la memorización llega con la práctica.
+
+**Get-Help / Update-Help**
+
+- `Get-Help <cmdlet>` → nombre, sintaxis, aliases, remarks. Sin help files instalados muestra ayuda parcial.
+- `Get-Help <cmdlet> -Online` → abre la doc de Microsoft en el browser.
+- `Update-Help` → descarga help actualizado de todos los cmdlets (correr como admin; luego Get-Help muestra SYNOPSIS/DESCRIPTION/RELATED LINKS completos).
+- Variantes: `-examples`, `-detailed`, `-full`.
+
+**Navegación básica (cmdlets):**
+
+|Cmdlet|Alias|Equiv CMD|
+|---|---|---|
+|`Get-Location`|`pwd`, `gl`|`cd` sin args|
+|`Get-ChildItem`|`ls`, `dir`, `gci`|`dir`|
+|`Set-Location <ruta>`|`cd`, `sl`, `chdir`|`cd`|
+|`Get-Content <file>`|`cat`, `type`, `gc`|`type`|
+|`Clear-Host`|`clear`, `cls`|`cls`|
+
+**Get-Command — encontrar cmdlets**
+
+- Sin filtros lista todo lo cargado en la sesión.
+- `-verb <verbo>` → todo lo que empieza con ese verbo: `Get-Command -verb get` 
+- `-noun <sustantivo>` → por sustantivo con wildcard: `Get-Command -noun windows*`
+- Wildcard directo: `get-command get*` (equivalente a -verb get).
+
+**Historial — dos sistemas (dato clave):**
+
+1. **Session history**: `Get-History` → solo comandos de la sesión activa, numerados. Alias `r <id>` re-ejecuta (ej: `r 14`). **Muere con la sesión** (cerrar shell o matar proceso C2).
+2. **PSReadLine module**: historial persistente entre todas las sesiones en el archivo: `$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`
+    - Default guarda los últimos **4096** comandos (configurable vía `$MaximumHistoryCount`).
+    - **Feature de admin:** PSReadLine filtra automáticamente entradas que contengan: `password`, `asplaintext`, `token`, `apikey`, `secret`. La session history **no** filtra nada.
+    - Dato ofensivo: ese archivo es mina de oro post-explotación — credenciales, comandos con IPs, descargas (el ejemplo del módulo muestra un IEX download cradles y un ssh admin). En engagements, revisarlo es enumeración básica.
+
+**Hotkeys útiles (shell sin mouse):**
+
+|Hotkey|Acción|
+|---|---|
+|Ctrl+R|Historial buscable (reverse search)|
+|Ctrl+L|Limpiar pantalla|
+|Ctrl+Alt+Shift+?|Lista completa de shortcuts|
+|Esc|Borra la línea completa que se está escribiendo|
+|↑ / ↓|Navegar historial|
+|F7|TUI con historial scrollable interactivo|
+|Tab / Shift+Tab|Autocompletar comandos|
+
+**Aliases**
+
+- Alias = otro nombre para un cmdlet/comando/ejecutable. Ver todos: `Get-Alias` (alias de este: `gal`).
+- Crear: `Set-Alias -Name gh -Value Get-Help`.
+- **Aliases útiles (tabla del módulo):**
+
+|Alias|Equivale a|Notas|
+|---|---|---|
+|`pwd` / `gl`|Get-Location||
+|`ls` / `dir` / `gci`|Get-ChildItem||
+|`cd` / `sl` / `chdir`|Set-Location||
+|`cat` / `type` / `gc`|Get-Content||
+|`clear`|Clear-Host||
+|`curl` / `wget`|**Invoke-WebRequest**| NO es curl real: es cmdlet para descargar (en PS 6+ sí existe curl.exe nativo)|
+|`fl` / `ft`|Format-List / Format-Table|formatear output|
+|`man`|help||
+|`%`|ForEach-Object||
+|`?`|Where-Object||
+
+- Muchos aliases calcan comandos de Bash → facultan la curva de aprendizaje desde Linux.
