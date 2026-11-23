@@ -627,3 +627,224 @@ Recursos en la red:
 | **Inveigh** | Network spoofing y Man-in-the-Middle attacks |
 | **BloodHound / SharpHound** | Mapear AD visualmente: análisis gráfico + recolectores en C# y PowerShell |
 
+### User and Group Management (Intro to Windows Command Line 13/23)
+
+#### Lo que ya sabía (repaso)
+- 4 tipos de cuentas: Service Accounts, Built-in, Local users, Domain users.
+- Grupos = agrupación lógica de usuarios para dar permisos granulares sin manejar cada usuario a mano; en dominio pueden contener PCs, impresoras y otros grupos.
+- En PowerShell los verbos get/new/set/find gobiernan todo.
+
+#### Lo que NO sabía / no tenía claro
+
+**Cuentas built-in default (tabla):**
+
+| Cuenta | Descripción |
+|---|---|
+| Administrator | Tareas administrativas en el host local |
+| Default Account | Usada por el sistema para apps multi-user (ej: utilidad Xbox) |
+| Guest | Cuenta limitada para usuarios sin cuenta; **disabled por default y debe seguir así** |
+| WDAGUtilityAccount | Para Defender Application Guard (sandbox de aplicaciones) |
+
+**Local vs Domain users (la diferencia clave):**
+- **Domain users**: reciben derechos del dominio (file servers, printers, intranet) según user/group membership; pueden loguearse en **cualquier host del dominio**.
+- **Local users**: acceso solo al host donde fueron creados.
+- Conocer los matices de cada tipo "puede hacer o deshacer" el intento de PE o lateral movement de un pentester.
+
+**Active Directory (en contexto):**
+- AD = servicio de directorio: punto central de gestión de usuarios, computadoras, grupos, devices, shares, GPOs y trusts. "El gatekeeper del entorno enterprise".
+- Quien pertenece al dominio accede libre a recursos; quien no, queda afuera.
+- Se administra desde cualquier host domain-joined con el **ActiveDirectory Module**.
+
+**Gestión de usuarios/grupos locales (sin módulos externos):**
+
+| Cmdlet | Acción |
+|---|---|
+| `Get-LocalUser` | Listar usuarios locales (Name, Enabled, Description) |
+| `New-LocalUser -Name "X" -NoPassword` | Crear usuario (requiere nombre + password o -NoPassword). ⚠️ Sin password en algunas versiones de Windows lo trata como cuenta Microsoft live |
+| `Set-LocalUser -Name "X" -Password $Password -Description "..."` | Modificar (password se captura con `$Password = Read-Host -AsSecureString`) |
+| `Get-LocalGroup` | Listar grupos locales |
+| `Get-LocalGroupMember -Name "Users"` | Ver miembros de un grupo |
+| `Add-LocalGroupMember -Group "Remote Desktop Users" -Member "X"` | Agregar usuario a grupo |
+| `Get-Command *user*` | Si no se sabe el cmdlet, buscar por wildcard |
+
+**Gestión de dominio (ActiveDirectory Module):**
+- Requisito: instalar RSAT (Remote System Administration Tools) — única vía al módulo **oficial**. Ojo: el AD module que trae AdminToolbox es **reempaquetado**, usar con cautela.
+- Instalar todo RSAT: `Get-WindowsCapability -Name RSAT* -Online | Add-WindowsCapability -Online`
+- Ligero (solo AD): paquete `Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0`
+- Verificar: `Get-Module -Name ActiveDirectory -ListAvailable`
+
+| Cmdlet | Acción |
+|---|---|
+| `Get-ADUser -Filter *` | Todos los usuarios del dominio (mucho output en orgs grandes) |
+| `Get-ADUser -Identity <user>` | Buscar por distinguishedName, GUID, objectSid o SamAccountName |
+| `Get-ADUser -Filter {EmailAddress -like '*greenhorn.corp'}` | Filtrar por atributo (los filtros de Get-* aplican también a Set-*) |
+| `New-ADUser -Name "MTanaka" -Surname "Tanaka" -GivenName "Mori" -Office "Security" -OtherAttributes @{'title'="Sensei";'mail'="..."} -Accountpassword (Read-Host -AsSecureString) -Enabled $true` | Crear usuario con atributos default y extendidos |
+| `Get-ADUser -Identity MTanaka -Properties * \| Format-Table Name,Enabled,...` | Validar con pipe + Format-Table |
+| `Set-ADUser -Identity MTanaka -Description "..."` | Modificar atributos |
+| (Get/Set/New/Add/Remove)-ADGroup, -ADGroupMember | Grupos de dominio (misma lógica) |
+
+- Atributos clave del output: **ObjectClass** (user/computer/otro), **DistinguishedName** (ruta relativa en el esquema AD), **Enabled**, **SamAccountName** (el username de login), **ObjectGUID** (ID único), SID.
+- `-Enabled $true` es obligatorio para que la cuenta pueda loguear.
+
+**Por qué importa para el pentester:**
+- Us mal configurados: permisos excesivos, miembros de grupos innecesarios, passwords débiles o vacíos.
+- Grupos con **nested membership**: usuarios ganan privilegios que no necesitan.
+- Estas misconfigs se encuentran y visualizan fácil con **Bloodhound**.
+- Referencia directa al módulo *Windows Privilege Escalation* para el detalle.
+
+### Working with Files and Directories - PowerShell (Intro to Windows Command Line 14/23)
+
+#### Lo que ya sabía (repaso)
+- Verbos Get/Set/New gobiernan PowerShell; muchos cmdlets aplican igual a archivos, carpetas e incluso objetos del registry.
+- `New-Item` crea archivos, carpetas, symlinks y entradas de registry.
+- `tree /F` funciona igual desde PowerShell para visualizar estructura.
+
+#### Lo que NO sabía / no tenía claro
+
+**Tabla de cmdlets de archivos/carpetas:**
+
+| Cmdlet | Alias | Descripción |
+|---|---|---|
+| `Get-Item` | `gi` | Recupera un objeto (archivo, folder, objeto de registry...) |
+| `Get-ChildItem` | `ls`, `dir`, `gci` | Lista contenido de un folder o registry hive |
+| `New-Item` | `md`, `mkdir`, `ni` | Crea objetos: archivos, carpetas, symlinks, entradas de registry |
+| `Set-Item` | `si` | Modifica valores de propiedad de un objeto |
+| `Copy-Item` | `copy`, `cp`, `ci` | Duplica un item |
+| `Rename-Item` | `ren`, `rni` | Cambia el nombre |
+| `Remove-Item` | `rm`, `del`, `rmdir` | Elimina el objeto |
+| `Get-Content` | `cat`, `type` | Muestra contenido de un archivo |
+| `Add-Content` | `ac` | **Anexa** contenido a un archivo |
+| `Set-Content` | `sc` | **Sobrescribe** todo el contenido con datos nuevos |
+| `Clear-Content` | `clc` | Limpia el contenido **sin borrar el archivo** |
+| `Compare-Object` | `diff`, `compare` | Compara dos o más objetos (el objeto y su contenido) |
+
+- `Add-Content .\file.md "texto"` acepta strings multilínea directos (con Enter continúa el string).
+- **Bulk rename con pipeline** (el truco fuerte de la sección):
+  `Get-ChildItem -Path *.txt | Rename-Item -NewName {$_.name -replace ".txt",".md"}`
+  → `$_` = objeto actual del pipeline; `-replace` hace regex replace sobre el nombre. Forma rápida de acciones masivas sobre archivos.
+
+**File & Directory Permissions (NTFS) — tipos clave:**
+
+| Permiso | Qué permite |
+|---|---|
+| **Full Control** | Todo lo de abajo + **cambiar permisos** y **tomar ownership** |
+| Modify | Leer, escribir y borrar archivos/carpetas |
+| List Folder Contents | Ver y listar carpetas/subcarpetas + ejecutar archivos (**solo aplica a carpetas**) |
+| Read & Execute | Ver contenido de archivos + correr ejecutables (.ps1, .exe, .bat) |
+| Write | Crear archivos/subcarpetas y agregar contenido |
+| Read | Ver/listar carpetas y ver contenido de archivos |
+| Traverse Folder | Acceder a archivos/subcarpetas de un árbol **sin** acceso al contenido de carpetas de nivel superior — acceso selectivo |
+
+- **Herencia**: NTFS permite setear permisos en un directorio padre y que se propaguen a todo lo contenido → ahorra tiempo vs. setear objeto por objeto. Se puede deshabilitar por archivo/carpeta/subcarpeta específica (pero entonces toca setear manualmente).
+- El módulo remite el juego profundo con permisos al **Windows Fundamentals Module** (la skills assessment que ya hiciste: share + NTFS + Disable Inheritance).
+- Contexto: en organizaciones grandes los permisos mantienen acceso "need to know" (HR/IT/Sales no se mezclan).
+
+### Finding & Filtering Content (Intro to Windows Command Line 15/23)
+
+#### Lo que ya sabía (repaso)
+- En PowerShell todo es un objeto (a diferencia de Bash/CMD donde todo es texto).
+- `|` concatena comandos en pipeline, ejecutándose de izquierda a derecha.
+
+#### Lo que NO sabía / no tenía claro
+
+**Conceptos de objetos (con la analogía del módulo):**
+- **Object** = instancia individual de una clase (la computadora completa: partes + diseño + software).
+- **Class** = el schema/blueprint que define cómo se arma la cosa.
+- **Property** = los datos asociados al objeto (las partes individuales: cada una con propósito único).
+- **Method** = las funciones que el objeto puede ejecutar (procesar datos, navegar...).
+
+**Ver las propiedades/métodos de un objeto:**
+- `Get-LocalUser administrator | Get-Member` → lista TypeName, todos los **Methods** (Clone, Equals, GetType, ToString...) y **Properties** (Name, Enabled, SID, PasswordLastSet, LastLogon...).
+- `Select-Object -Property *` → ver todos los valores de las propiedades.
+
+**Filtrar, ordenar, agrupar:**
+- `Get-LocalUser * | Select-Object -Property Name,PasswordLastSet` → solo las propiedades que interesan (ej: quién cambió password recientemente).
+- `Sort-Object -Property Name` → ordenar por propiedad.
+- `Group-Object -Property Enabled` → agrupar (output: Count, Name, Group).
+
+**Por qué filtrar:** objetos como servicios tienen muchísimas propiedades (`Get-Service | Select-Object -Property *` = output inmanejable). Filtrar a lo esencial antes de actuar.
+
+**Where-Object (`where`) + Comparison Operators:**
+- Escenario del módulo: shell inicial ganada → antes de seguir, detectar defensas:
+  `Get-Service | where DisplayName -like '*Defender*'`
+  → mpssvc (Firewall, Running), Sense (ATP), WdNisSvc, WinDefend. Dato: se detectó la defensa → regroup y planear evasión en vez de actuar a ciegas.
+
+| Operator | Descripción |
+|---|---|
+| `-like` | Wildcards: `'*Defender*'` matchea cualquier valor que contenga "Defender" |
+| `-contains` | El objeto matchea si algún item del property value es exactamente igual |
+| `-eq` | Match exacto (case sensitive) |
+| `-match` | Match por **regex** |
+| `-not` | Matchea si la propiedad está en blanco o no existe; también matchea `$False` |
+| (otros) | -gt, -lt, -ne... menos usados en este tipo de búsqueda |
+
+- Al encontrar servicios de defensa: revisar `Status`, `CanStop`, `StartType` con `Select-Object -Property *` para saber si se pueden afectar con los permisos actuales.
+
+**Pipeline en profundidad:**
+- `Command-1 | Command-2 | Command-3` — puede escribirse multilínea; PowerShell interpreta por la posición del `|`.
+- Ejemplo: `get-process | sort | unique | measure-object` → **113** procesos únicos corriendo.
+- `Measure-Object`, `Sort-Object`, `Unique` hacen del pipeline una herramienta de procesamiento de datos (logs, event codes, bases de datos).
+
+**Pipeline Chain Operators (`&&` y `||`)  solo sirven desde PowerShell 7+, NO en Windows PowerShell 5.1:**
+- `A && B` → B corre solo si A **tuvo éxito**.
+- `A || B` → B corre solo si A **falló**.
+- 5.1 da error; instalar PS7 en paralelo si se quieren usar.
+- Caso de uso: condicionales en scripts (ej: `Get-Content file && ping host` vs `||` para fallback).
+
+**Select-String (`sls`) ≈ grep ≈ findstr:**
+- Busca por **regex** en contenido de archivos o strings de input.
+- Output por defecto: **línea que matchea + nombre del archivo + número de línea**.
+- No es case sensitive por default → `-CaseSensitive` lo vuelve sensitivo.
+- Acepta múltiples términos: `sls "Password","credential","key"`.
+
+**El hunt: encontrar archivos interesantes + grepear contenido**
+1. `Get-ChildItem -Path C:\Users\MTanaka\ -File -Recurse` → demasiado output.
+2. Filtrar por extensiones típicas con where + `-or`:
+   `gci -Path <dir> -File -Recurse -ErrorAction SilentlyContinue | where {($_.Name -like "*.txt" -or $_.Name -like "*.py" -or $_.Name -like "*.ps1" -or $_.Name -like "*.md" -or $_.Name -like "*.csv")}`
+   - `-ErrorAction SilentlyContinue` → el pipeline no se rompe ante archivos/directorios sin permiso.
+3. Pipear a sls con keywords: `... | sls "Password","credential","key","UserName"`
+   → El ejemplo del módulo encontró `Password: F@ll2022!` en notes.txt.
+
+**Directorios jugosos para loot (checklist del módulo):**
+- `C:\Users\<user>\AppData\` → configs de aplicaciones, temp saves.
+- `C:\Users\<user>\` home → VPN keys, SSH keys, típicamente en carpetas **ocultas** → `Get-ChildItem -Hidden`.
+- **Console History**: `C:\Users\<user>\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost_history.txt` o `(Get-PSReadlineOption).HistorySavePath`.
+- **Clipboard**: `Get-Clipboard` → puede tener info útil.
+- **Scheduled tasks** → revisarlas también.
+
+### Working with Services - PowerShell (Intro to Windows Command Line 16/23)
+
+#### Lo que ya sabía (repaso)
+- Servicios = instancias de componentes corriendo en background, sin interfaz de usuario; una sola instancia del servicio por host, pero puede mantener múltiples procesos.
+- 3 categorías: Local Services, Network Services, System Services (sección 8 de Windows Fundamentals).
+- Módulo `Microsoft.PowerShell.Management` contiene los cmdlets de servicios; `Get-Help *-Service` los lista todos: Get/New/Remove/Restart/Resume/Set/Start/Stop/Suspend-Service.
+- Estatus posibles: Running, Stopped, Paused. Start types: Manual, Automatic (Delayed).
+
+#### Lo que NO sabía / no tenía claro
+
+**Contexto del escenario (visión blue team):**
+- Mr. Tanaka reporta: ventana rara por la mañana (pensó que era Windows Update) → ahora alertas de "Defender apagado" + host lento. Tarea: averiguar qué servicios de Defender están detenidos y reactivarlos (los event logs se verán después).
+- Permisos: para más que queries se necesita ser **local admin** (o tener permisos vía grupos de dominio); también funciona abrir PowerShell en contexto administrativo.
+
+**Triage paso a paso:**
+1. `Get-Service | ft DisplayName,Status` → el host del módulo tenía **321 servicios** → `| measure` para contar.
+2. Filtro fino: `Get-Service | where DisplayName -like '*Defender*' | ft DisplayName,ServiceName,Status`
+   → Hallazgo: WinDefend (Microsoft Defender Antivirus Service) **Stopped** — el AV estaba apagado.
+3. `Start-Service WinDefend` → sin error = éxito (un error tipo "blocked by your antivirus" del Parser indicaría otra cosa). Verificar con `get-service WinDefend` → Running.
+   - Ojo: para start/stop/query se usa el **Name** (WinDefend), no el DisplayName.
+4. Búsqueda de anomalías: un servicio con DisplayName raro ("Totally still used for Print Spooling..." para Spooler) → DisplayName modificado = posible IOC.
+5. Contención: `Stop-Service Spooler` → verificar Stopped → `Set-Service -Name Spooler -StartType Disabled`.
+   - `Set-Service -Name X -StartType Disabled` modifica el startup (Automatic/Manual/Disabled).
+6. **Borrar servicios:** `Remove-Service` **solo funciona en PowerShell 7** — en 5.1 (default del host) hay que usar `sc.exe`.
+
+**Servicios remotos:**
+- `-ComputerName <host>` → query remoto directo: `get-service -ComputerName ACADEMY-ICL-DC`.
+- Como todo es objeto, el output remoto sigue filtrándose con pipeline: `Get-Service -ComputerName X | Where-Object {$_.Status -eq "Running"}`.
+- **Invoke-Command** para múltiples hosts:
+  `invoke-command -ComputerName ACADEMY-ICL-DC,LOCALHOST -ScriptBlock {Get-Service -Name 'windefend'}`
+  - Comma-separated list de hosts.
+  - `-ScriptBlock { <comandos> }` — debe ir entre llaves.
+  - El output incluye PSComputerName para identificar de qué host vino cada resultado.
+
+**Uso defensivo destacado:** el DisplayName modificado de Spooler es la pista de un incidente en expansión → con `-ComputerName` o Invoke-Command se barren **todos los hosts** del entorno buscando la misma anomalía → reducir el tiempo de permanencia de la amenaza.
+
