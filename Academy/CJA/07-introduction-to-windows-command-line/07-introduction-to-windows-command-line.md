@@ -566,3 +566,64 @@ Recursos en la red:
 |`?`|Where-Object||
 
 - Muchos aliases calcan comandos de Bash → facultan la curva de aprendizaje desde Linux.
+
+### All About Cmdlets and Modules (Intro to Windows Command Line 12/23)
+
+#### Lo que ya sabía (repaso)
+- Cmdlet = comando de característica única que manipula objetos en PowerShell; estructura **Verb-Noun** (`Test-WSMan`: Verb=Test, Noun=WSMan, separados por `-`).
+- `Get-Command` muestra cmdlets con su "CommandType"; `Get-Help` y `Get-Member` muestran opciones/funcionalidad.
+- **Diferencia clave:** los cmdlets **no están escritos en PowerShell** — son C# u otro lenguaje compilado (a diferencia de funciones).
+
+#### Lo que NO sabía / no tenía claro
+
+**Módulos**
+- Módulo = código PowerShell estructurado para usar y compartir. Puede contener: cmdlets, script files, funciones, assemblies, manifests y help files.
+- Proyecto de referencia del módulo: **PowerSploit** (PowerShellMafia) — colección de tools para pentesting de dominios AD. **Está archivado** pero sigue siendo útil (nota del módulo, agosto 2022). Su uso real se cubre en profundidad en el módulo *Active Directory Enumeration & Attacks*.
+
+**Anatomía de un módulo:**
+| Archivo | Qué es | Contenido |
+|---|---|---|
+| `.psd1` | **Module manifest** (data file) | Referencia al módulo, version numbers, GUID, author, copyright, compatibilidad PowerShell, módulos/cmdlets incluidos, metadata |
+| `.psm1` | **Script module** — el script con el código | "La carne" del módulo |
+
+- El PowerSploit.psm1 importa todo con una sola línea usando aliases: `Get-ChildItem $PSScriptRoot | ? {...} | % { Import-Module $_.FullName -DisableNameChecking }`
+  - `$PSScriptRoot` = directorio del script automático
+  - `?` = Where-Object | `%` = ForEach-Object
+  - `-DisableNameChecking` evita errores si el módulo trae funciones con nombres ya existentes en la sesión.
+
+**Manejo de módulos en la sesión**
+- `Get-Module` → módulos **cargados** en la sesión actual.
+- `Get-Module -ListAvailable` → todos los **instalados** (aunque no cargados).
+- `Import-Module <ruta>` → agrega el módulo a la sesión. Sintaxis completa vía `Get-Help Import-Module`.
+- Flujo típico: cmdlet no reconocido (ej. `Get-NetLocalgroup` sin importar) → error → `Import-Module .\PowerSploit.psd1` → cmdlet disponible.
+- **PSModulePath**: `$env:PSModulePath` muestra las rutas donde PowerShell busca módulos por default (`Documents\WindowsPowerShell\Modules`, `Program Files\...\Modules`, `system32\...\v1.0\Modules`). Agregar archivos ahí los carga permanentemente — útil en host de ataque propio, pero en engagement mejor transferir el script y usar `Import-Module` a demanda.
+- `Get-Command -Module <modulename>` → qué aliases, cmdlets y funciones trajo el módulo cargado.
+
+**Execution Policy**
+- **No es un control de seguridad** (según Microsoft) — es una herramienta de safeguards para admins.
+- Error típico: `Import-Module` → *"running scripts is disabled on this system"*.
+- `Get-ExecutionPolicy` → ver estado (default: `Restricted`).
+- `Set-ExecutionPolicy undefined` → quita límites. **Advertencia del módulo:**
+  - Como sysadmin: revertir siempre al terminar.
+  - Como pentester: **no revertir = IOC** — un defensor ve el cambio y sabe que el host fue comprometido. Limpiar las huellas.
+- **Bypass limpio por scope de proceso:** `Set-ExecutionPolicy -Scope Process` → `Get-ExecutionPolicy -list` muestra `Process: Bypass`. **Reviene solo al cerrar la sesión** — sin cambio persistente. Scopes: MachinePolicy, UserPolicy, Process, CurrentUser, LocalMachine.
+- Siempre revisar los scripts antes de cargarlos. El módulo enlaza un blog con bypasses creativos usados en engagements reales.
+
+**Instalar módulos — PowerShell Gallery + PowerShellGet**
+- **PowerShell Gallery**: repositorio de scripts/módulos de Microsoft y la comunidad.
+- **PowerShellGet**: módulo built-in para interactuar con la Gallery: `Find-Module`, `Install-Module`, `Save-Module`, `Install-Script`, etc.
+- `Find-Module -Name AdminToolbox` → buscar; wildcards soportados.
+- `Install-Module` → instalar (requiere **admin**).
+- Pipeline: `Find-Module ... | Install-Module` → encontrar e instalar en un solo comando.
+- Módulos instalados desde la Gallery se **auto-importan** al primer uso del cmdlet — distinto de módulos custom traídos de GitHub, que hay que importar manual cada sesión (salvo que se modifique el PowerShell Profile).
+
+**Tools a conocer (tabla del módulo):**
+
+| Tool | Qué hace |
+|---|---|
+| **AdminToolbox** | Colección de módulos para admins: AD, Exchange, red, storage... |
+| **ActiveDirectory** | Administración local/remota de todo AD: usuarios, grupos, permisos |
+| **Empire / Situational Awareness** | Módulos de situational awareness de host y dominio (mantenido por BC Security) |
+| **Inveigh** | Network spoofing y Man-in-the-Middle attacks |
+| **BloodHound / SharpHound** | Mapear AD visualmente: análisis gráfico + recolectores en C# y PowerShell |
+
