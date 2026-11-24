@@ -848,3 +848,209 @@ Recursos en la red:
 
 **Uso defensivo destacado:** el DisplayName modificado de Spooler es la pista de un incidente en expansión → con `-ComputerName` o Invoke-Command se barren **todos los hosts** del entorno buscando la misma anomalía → reducir el tiempo de permanencia de la amenaza.
 
+### Working with the Registry (Intro to Windows Command Line 17/23)
+
+#### Lo que ya sabía (repaso)
+- Registry = arbol jearquico con **keys** (contenedores que representan componentes del PC, pueden contener subkeys y values; nombres alfanuméricos, no case-sensitive) y **values** (nombre + tipo + datos).
+- Root keys almacenadas en `C:\Windows\System32\Config\` (SAM, SECURITY, SOFTWARE, SYSTEM, DEFAULT...).
+- El Registry es mina de info para el pentester: software instalado, OS revision, security settings, control de Defender; también punto de persistencia. MITRE tiene ejemplos de abuso.
+
+#### Lo que NO sabía / no tenía claro
+
+**Hives predefinidos (tabla):**
+
+| Hive | Abbr. | Contenido |
+|---|---|---|
+| HKEY_LOCAL_MACHINE | HKLM | Estado físico de la máquina: hardware, OS data, bus types, memoria, device drivers |
+| HKEY_CURRENT_CONFIG | HKCC | Hardware profile actual (varianza vs. default); redirect de HKLM CurrentControlSet |
+| HKEY_CLASSES_ROOT | HKCR | Filetype info, UI extensions, backward compatibility |
+| HKEY_CURRENT_USER | HKCU | Settings de OS y software por usuario; roaming profile settings |
+| HKEY_USERS | HKU | Default user profile + current user config del equipo local |
+
+- **Por qué importa ofensivamente**: no hay mejor punto único con tanta info + capacidad de hacer cambios masivos. Y es difícil de defender: hives enormes, cientos de entradas — un cambio es "aguja en un pajar" salvo backups sólidos.
+
+**Acceso desde CLI — dos vías:**
+1. **reg.exe** (DOS executable, hecho para manejar Registry)
+2. **Cmdlets**: `Get-Item`/`Get-ChildItem` para leer keys, `Get-ItemProperty` para values, `New-ItemProperty`/`Set-ItemProperty` para crear/modificar, `New-Item` para keys nuevas.
+
+**Query con cmdlets:**
+- `Get-Item -Path Registry::HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run | Select-Object -ExpandProperty Property` → solo nombres de values.
+- `Get-ChildItem -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion -Recurse` → explota en output (cada key con sus values). Sintaxis con drive `HKLM:`.
+- `Get-ItemProperty -Path Registry::HKLM\...\Run` → **mucho más legible**: nombre del value + dato (ej: `SecurityHealth : C:\Windows\system32\SecurityHealthSystray.exe`).
+- La key **Run** arranca apps al logon del usuario → alta visibilidad para el pentester; tiene varias versiones (se ven después).
+
+**Reg.exe:**
+- `reg query HKEY_LOCAL_MACHINE\SOFTWARE\7-Zip` → values con su tipo (`REG_SZ` = string Unicode/ASCII).
+- **Búsqueda con reg query** (donde reg.exe brilla):
+  `REG QUERY HKCU /F "Password" /t REG_SZ /S /K`
+  - `/F` patrón | `/t` tipo de value (si no se especifica, busca en todos) | `/S` recursivo por subkeys | `/K` solo nombres de Key.
+  - Vale la pena probar keywords: Password, Username, Credentials, Keys.
+
+**Crear/modificar/borrar (RunOnce persistence):**
+- Escenario del módulo: land on host → key de persistencia → RunOnce ejecuta el payload al próximo logon.
+- `New-Item -Path HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce\ -Name TestKey` → key nueva (con `-Path` absoluto no hace falta moverse del cwd).
+- `New-ItemProperty -Path HKCU:\...\RunOnce\TestKey -Name "access" -PropertyType String -Value "C:\...\payload.exe"` → value creado.
+- Equivalente reg.exe: `reg add "HKEY_CURRENT_USER\Software\...\RunOnce\TestKey" /v access /t REG_SZ /d "C:\...\payload.exe"`.
+- **RunOnce se auto-borra tras ejecutarse** — ideal para persistencia limpia (deja menos huella que Run).
+- Borrar: `Remove-ItemProperty -Path HKCU:\...\TestKey -Name "access"`.
+- Advertencia del módulo: borrar entradas del Registry puede romper el host — "with great power comes great responsibility".
+
+### Working with the Windows Event Log (Intro to Windows Command Line 18/23)
+
+#### Lo que ya sabía (repaso)
+- Event = cualquier acción/ocurrencia identificable y clasificable por hardware o software del sistema.
+- Windows Event Log = servicio que registra, almacena y administra eventos de forma estándar y centralizada; expone una API para que aplicaciones mantengan sus propios logs.
+- Es un servicio requerido que corre en `svchost.exe` (display name: Windows Event Log), auto-inicio, difícil de detener (múltiples dependencias; detenerlo = inestabilidad).
+
+#### Lo que NO sabía / no tenía claro
+
+**Fuentes de eventos:**
+- **User-generated**: mouse, teclado, periféricos.
+- **Application-generated**: updates, crashes, consumo de memoria.
+- **System-generated**: uptime, updates, carga de drivers, logins.
+
+**Log categories (tabla):**
+
+| Category | Contenido |
+|---|---|
+| System | Windows y sus componentes (ej: servicio que falla al boot) |
+| Security | Logins exitosos/fallidos, creación/borrado de archivos — clave para detectar ataques |
+| Application | Software instalado (ej: Slack no arranca) |
+| Setup | Instalación del OS; en DCs de dominio registra eventos de AD |
+| Forwarded Events | Logs reenviados desde otros hosts de la red |
+
+**Event types:**
+- Error (problema mayor, ej: servicio no carga), Warning (posible problema futuro, ej: poco disco; la app se recupera sola), Information (operación exitosa), Success Audit (acceso auditado exitoso), Failure Audit (intento fallido — muchos pueden indicar Password Spraying).
+
+**Severity levels (número):**
+Verbose 5 → Information 4 → Warning 3 → Error 2 → **Critical 1**.
+
+**Elementos de un evento:**
+- Log name, Date/time, Task Category, **Event ID** (identificador único del evento), Source (programa de origen), Level, User, Computer. Hay bases de datos buscables de Event IDs — en AD hay eventos clave recomendados para detectar compromiso.
+
+**Detalles técnicos:**
+- Logs almacenados en `C:\Windows\System32\winevt\logs\` con extensión **.evtx**.
+- Interacción: GUI (Event Viewer), **wevtutil** (CMD), **Get-WinEvent** (PowerShell). Ambos sirven local y remoto.
+
+**wevtutil (CMD):**
+
+| Comando | Acción |
+|---|---|
+| `wevtutil el` | Listar todos los logs |
+| `wevtutil gl <log>` | Config del log (enabled, maxSize, permisos, path) |
+| `wevtutil gli <log>` | Status: creationTime, lastWrite, fileSize, **numberOfLogRecords** |
+| `wevtutil qe <log> /c:N /rd:true /f:text` | Query últimos N eventos, orden descendente, formato texto (**requiere admin**, sobre todo en Security) |
+| `wevtutil epl <log> <archivo.evtx>` | Exportar log para análisis offline (requiere admin) |
+| `wevtutil cl <log>` | Clear log |
+
+- Ejemplo del módulo: `wevtutil qe Security /c:5 /rd:true /f:text` → muestra Event 4799, 4672 (special privileges asignados: SeDebug, SeImpersonate...), 4624 (logon exitoso).
+
+**Get-WinEvent (PowerShell):**
+- `Get-WinEvent -ListLog *` → todos los logs con RecordCount y tamaño máximo.
+- `Get-WinEvent -ListLog Security` → info de uno (tamaño, cantidad).
+- `Get-WinEvent -LogName 'Security' -MaxEvents 5 | Select-Object -ExpandProperty Message` → últimos 5 (default: newest first; `-Oldest` invierte).
+- **FilterHashTable** (el filtro fuerte):
+  - `Get-WinEvent -FilterHashTable @{LogName='Security';ID='4625'}` → solo logon failures (Event ID 4625).
+  - `Get-WinEvent -FilterHashTable @{LogName='System';Level='1'}` → solo Critical (ej: el sistema no rebootó limpio).
+- Como todo es objeto, se puede pipear, expandir propiedades, etc.
+
+**Perspectiva ofensiva (del módulo):**
+- A veces hay **credenciales en los event logs** de sistemas comprometidos.
+- Enumerar logs revela el nivel de logging del entorno: defaults o configuración granular.
+- Los atacantes también ven los logs como vía para entender el entorno, **disruptar el flujo de información y esconder huellas**.
+- Logging masivo solo es útil con un **SIEM** que alerte sobre Event IDs específicos (Kerberoasting, Password Spraying).
+
+### Networking Management from the CLI (Intro to Windows Command Line 19/23)
+
+#### Lo que ya sabía (repaso)
+- El networking en Windows funciona como en Linux/Unix (TCP/IP stack igual); lo distintivo es cómo se comunican los hosts Windows entre sí, con dominios y con Linux.
+- Comandos clásicos que siguen funcionando en PowerShell: `ipconfig` (/all para config completa), `arp -a`, `nslookup`, `netstat -an`.
+
+#### Lo que NO sabía / no tenía claro
+
+**Protocolos comunes en entornos Windows (tabla del módulo):**
+
+| Protocolo | Descripción |
+|---|---|
+| SMB | Compartir recursos/archivos + autenticación entre hosts (SAMBA = opción open-source) |
+| NetBIOS | No es protocolo directo: mecanismo de conversación; fue transporte original de SMB; hoy = identificación alterna cuando DNS falla (NBT-NS) |
+| LDAP | Cross-platform, auth/authz contra directory services (AD) |
+| LLMNR | Resolución de nombres multicast **solo en local link** (mismo broadcast domain, no cruza L3); funciona cuando DNS no está |
+| DNS | Nombres únicos en vez de IPs |
+| HTTP/HTTPS | Request de recursos web (inseguro / seguro) |
+| Kerberos | Auth a nivel de red; hoy = tickets de AD para recursos del dominio |
+| WinRM | Implementación de WS-Management; administra hardware/software; también enumeración y scripting engine |
+| RDP | UI gráfica remota (teclado/mouse pasan al host remoto) |
+| SSH | Acceso seguro, transferencia de archivos, comunicación entre hosts |
+
+**Validación de red local (checkup de Tanaka):**
+- `ipconfig` → IPv4/6, gateway, subnet, DNS suffix. `ipconfig /all` → hostname, MAC, DHCP (lease/obtained/expiry), DNS servers, NetBIOS over TCP/IP.
+- **Dato ofensivo clave**: host **dual-homed** (múltiples interfaces en redes separadas) es igual a  objetivo perfecto para foothold y pivoteo entre redes. El ejemplo: 10.129.x.x + 172.16.5.x (con DNS del DC: 172.16.5.155).
+- `arp -a` → hosts con los que habló (gateways, DC). `nslookup ACADEMY-ICL-DC` → valida DNS.
+- `netstat -an` → conexiones y puertos en escucha en forma numérica. Puertos del ejemplo: 22 (SSH), 135 (RPC), 445 (SMB), 3389 (RDP), 5985 (WinRM HTTP), 47001; conexión activa: la propia sesión SSH del atacante.
+- Como admin esto es checkup; como pentester esto es **enumeración de superficie de ataque**.
+
+**Cmdlets Net (módulos NetAdapter/NetConnection/NetTCPIP):**
+
+| Cmdlet | Equiv clásico | Descripción |
+|---|---|---|
+| `Get-NetIPInterface` | — | Propiedades visibles de cada adapter (broken por AddressFamily: IPv4 e IPv6 por separado) |
+| `Get-NetIPAddress` | ipconfig | IP config por adapter; filtrar con `-ifIndex N` o `-InterfaceAlias` |
+| `Get-NetNeighbor` | arp -a | Cache de vecinos |
+| `Get-NetRoute` | route print | Tabla de rutas |
+| `Set-NetAdapter` | — | L2: VLAN id, description, MAC |
+| `Set-NetIPInterface` | — | DHCP status, MTU, métricas |
+| `New-NetIPAddress` / `Set-NetIPAddress` | — | Crear/modificar IP del adapter |
+| `Disable/Enable/Restart-NetAdapter` | — | Controlar adapters (Restart = "no news is good news") |
+| `Test-NetConnection` | ping/tracert | Diagnóstico: ping, TCP, route tracing |
+
+- Cambio DHCP → manual: `Set-NetIPInterface -InterfaceIndex 25 -Dhcp Disabled` → `Set-NetIPAddress -InterfaceIndex 25 -IPAddress 10.10.100.54 -PrefixLength 24` → `Restart-NetAdapter -Name 'Ethernet 3'` → verificar con `Test-NetConnection`.
+- `ifIndex`/`InterfaceAlias` son las llaves para operar el resto de los cmdlets.
+
+**Acceso remoto — SSH:**
+- OpenSSH client+server incluidos en Windows desde 2018 (Server y Client).
+- Setup: `Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH*'` → `Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0` (y Client si falta) → `Start-Service sshd` → `Set-Service -Name sshd -StartupType Automatic`.
+- Conexión desde Windows o Linux: `ssh user@ip` → por default cae en CMD → escribir `powershell` para PS session. Pasos idénticos desde cualquier OS.
+
+**WinRM (Windows Remote Management):**
+- Más común en Servers (default enabled); cada vez más en desktops. Puertos **5985 (HTTP) y 5986 (HTTPS)**.
+- Habilitar: `winrm quickconfig` → hace todo: enable servicio, firewall exception (in/out), LocalAccountTokenFilterPolicy para admin rights remotos a local users.
+-  "Con credenciales válidas, cualquiera que alcance el target por red puede conectar" → hardening necesario:
+  - TrustedHosts solo con IPs/hostnames de gestión
+  - HTTPS como transporte
+  - Unir a AD + forzar Kerberos
+- Test: `Test-WSMan -ComputerName <ip>` → **unauthenticated** (no revela OS version). Con `-Authentication Negotiate` → autenticado, revela OS (10.0.17763).
+
+**PSSessions (PowerShell Remoting):**
+- `Enter-PSSession -ComputerName <ip> -Credential <user> -Authentication Negotiate` → sesión interactiva; el prompt cambia a `[IP]: PS ...>`.
+- Corre igual desde Linux con PowerShell Core (Pwnbox lo trae).
+- Invoke-Command (sección 16) es el modo no-interactivo/multi-host.
+
+### Interacting With The Web (Intro to Windows Command Line 20/23)
+
+#### Lo que ya sabía (repaso)
+- `Invoke-WebRequest` (alias `wget`, `iwr`, `curl`) es el cmdlet campeón para HTTP/HTTPS: GET/POST, parsear HTML, descargar archivos, autenticar, mantener sesiones. Introducido en PS 3.0.
+- Soporta HTTP, HTTPS, FTP y FILE requests; parsea la respuesta y devuelve colecciones de forms, links, imágenes y otros elementos HTML.
+
+#### Lo que NO sabía / no tenía claro
+
+**Propiedades del objeto de respuesta (`HtmlWebResponseObject`):**
+- `Content`, `RawContent`, `RawContentLength`, `Headers`, `StatusCode`, `StatusDescription`.
+- **Elementos parseados**: `Links`, `Images`, `Forms`, `InputFields`, `Scripts`, `AllElements`, `ParsedHtml`.
+- Ejemplo: `Invoke-WebRequest -Uri <url> -Method GET | fl Images` → lista solo las imágenes del sitio (con src). `fl RawContent` → headers HTTP completos + HTML crudo.
+- Recon rápido de un sitio: nombres, direcciones, emails — sin abrir browser.
+-  Nota de Get-Help: por default el cdigo script de la página puede correrse al parsear `ParsedHtml` → usar `-UseBasicParsing` para suprimirlo.
+
+**Descarga de archivos:**
+- Desde Internet: `Invoke-WebRequest -Uri "https://raw.githubusercontent.com/.../PowerView.ps1" -OutFile "C:\PowerView.ps1"`.
+- **Desde la red local (la vía stealth)**: alojar el tool en el attack host con `python3 -m http.server 8000` y descargar desde el target → evita requests a Internet que los appliances de borde detecten.
+- Caso de uso ofensivo: vulnerabilidad con ejecución de comandos pero sin shell interactivo → se descargan archivos para ampliar acceso. (El módulo *File Transfers* cubre esto a fondo.)
+
+**Fallback si Invoke-WebRequest está restringido — .Net.WebClient:**
+```powershell
+(New-Object Net.WebClient).DownloadFile("<URI>", "<archivo-destino>")
+```
+- Primer parámetro: URI del archivo; segundo: path de destino (relativo al cwd si no se da path completo).
+- Ejemplo del módulo: descarga BloodHound-win32-x64.zip.
+- Ruidoso: requests entrando/saliendo de la red + reads/writes de archivo = **deja logs**. Transferencia host-a-host local = solo logs en esos hosts, más difíciles de revisar que los logs de borde del cliente.
+
