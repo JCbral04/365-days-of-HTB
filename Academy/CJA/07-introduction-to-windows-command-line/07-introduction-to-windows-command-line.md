@@ -285,7 +285,6 @@ Recursos en la red:
 - `/R <ruta>` → búsqueda **recursiva** por todo el hive de directorios: `where /R C:\Users\student\ bio.txt`
 - Acepta **wildcards**: `where /R C:\Users\student\ *.csv` → encuentra por tipo de archivo.
 
-**find (strings, no archivos)**
 
 - Busca una cadena dentro de un archivo o del output de otro comando.
 - Modificadores:
@@ -1053,4 +1052,99 @@ Verbose 5 → Information 4 → Warning 3 → Error 2 → **Critical 1**.
 - Primer parámetro: URI del archivo; segundo: path de destino (relativo al cwd si no se da path completo).
 - Ejemplo del módulo: descarga BloodHound-win32-x64.zip.
 - Ruidoso: requests entrando/saliendo de la red + reads/writes de archivo = **deja logs**. Transferencia host-a-host local = solo logs en esos hosts, más difíciles de revisar que los logs de borde del cliente.
+
+### PowerShell Scripting and Automation (Intro to Windows Command Line 21/23)
+
+#### Lo que ya sabía (repaso)
+- PowerShell es modular; scripts se corren con `.\script.ps1` y módulos con `Import-Module`.
+- Script = archivo ejecutable de texto con cmdlets/funciones; módulo = un script simple o colección de scripts + manifests + funciones bundleados. Se importa y sus funciones quedan disponibles a voluntad.
+
+#### Lo que NO sabía / no tenía claro
+
+**Extensiones:**
+| Ext | Qué es |
+|---|---|
+| `.ps1` | Script ejecutable de PowerShell |
+| `.psm1` | Module file — define qué es el módulo y qué contiene |
+| `.psd1` | Data file — contenido del módulo en tabla de key/value pairs |
+
+**Los 4 componentes de un módulo estándar:**
+1. Directorio dentro de `$env:PSModulePath` (para auto-descubrimiento al importar).
+2. Manifest file (.psd1) — lista archivos + info del módulo.
+3. Code file (.ps1 o .psm1) con las funciones.
+4. Otros recursos (help files, scripts, docs).
+- No es estrictamente necesario todo: un solo .psm1 funciona; el módulo lo hace "por propiedad".
+
+**Manifest (.psd1):**
+- Hash table que: describe contenido/atributos, define prerequisitos (versiones PS, CLR, módulos requeridos), determina cómo se procesan los componentes, restringe qué se exporta.
+- `New-ModuleManifest -Path <ruta.psd1> -PassThru` → genera uno con defaults; `-PassThru` muestra el contenido.
+- **Todo es opcional excepto `ModuleVersion`**; editar más fácil en VSCode.
+
+**Script del módulo (la carne):**
+- `Import-Module ActiveDirectory` al inicio si se necesitan cmdlets externos.
+- **Variables**: `$Nombre = <acción/valor>` — ejemplos: `$Hostname = $env:ComputerName`, `$IP = ipconfig`, `$Domain = Get-ADDomain`, `$Users = Get-ChildItem C:\Users\`.
+- **Función** `Get-Recon`: crea `~\Desktop\recon.txt` con New-Item, arma `$Vars` con los resultados formateados, y `Add-Content` escribe todo.
+- **Comentarios**: `#` línea única; `<# ... #>` bloque multilínea.
+- **Comment-based help**: keywords `.<keyword>` dentro de un comment block (`.Description`, `.Example`, `.Notes`...). Colocación: al inicio/fin de la función, o arriba de ella con máximo una línea de separación. Luego funciona con `Get-Help <función>`.
+- **Export-ModuleMember**: controla qué se exporta. Si se omite → todo es exportable. Sin parámetros → nada se exporta. `-Function Get-Recon -Variable Hostname` → exporta esos específicos. `-Function *` exporta todas las funciones.
+
+**Scope (3 niveles):**
+| Scope | Descripción |
+|---|---|
+| Global | Default; afecta todo lo que existe al iniciar PowerShell (incluido lo del profile) |
+| Local | El scope actual donde se opera (default o child scopes) |
+| Script | Temporal, solo aplica al script que corre; invisible para otros scripts y la sesión. Al script, su scope ES el local |
+- Child scopes: correr un script instancia el script scope; una función dentro puede spawnear su propio child scope. Se puede modificar para proteger contenido de función del resto. Tema complejo, solo mencionado.
+
+**Uso final:**
+- `Import-Module 'C:\...\quick-recon.psm1'` → `Get-Module` confirma carga (ExportedCommands: Get-Recon).
+- `Get-Help Get-Recon` → muestra el comment-based help (SYNOPSIS/DESCRIPTION funcionan).
+
+#### Para mi libreta
+- `.ps1` script | `.psm1` module | `.psd1` manifest
+- Módulo en `$env:PSModulePath` + manifest + psm1
+- `New-ModuleManifest -Path x.psd1 -PassThru` (solo ModuleVersion obligatorio)
+- `$var = <cmdlet>` → capturar output en variable
+- `function Get-X { ... }` + `New-Item`/`Add-Content` para output a archivo
+- `<# .Description / .Example / .Notes #>` → comment-based help
+- `Export-ModuleMember -Function Get-X -Variable Y` → control de exports
+- Scopes: Global / Local / Script + child scopes
+- `Import-Module <ruta.psm1>` → `Get-Module` verifica
+
+### Skills Assessment (Intro to Windows Command Line 22/23)
+
+#### Lo que ya sabía (repaso)
+- Es la evaluación práctica del módulo: pone en juego todo lo visto desde la sección 6 (enumeración de usuarios, archivos, registry, logs, variables de entorno, historial).
+
+#### Lo que NO sabía / no tenía claro
+- **Escenario**: penetration test en equipo; un host Windows no crítico con muchos usuarios. La tarea asignada: recolectar info enfocada en **encontrar nombres de usuario y contraseñas**, documentando todo.
+- **Encadenamiento de credenciales**: cada pregunta corresponde a un usuario distinto con el que hay que autenticarse. La flag de un usuario = la password del siguiente usuario para conectarse por SSH (user2 → password de user3, y así sucesivamente).
+- En cada reto puede pedirse: acciones específicas, usar ejecutables específicos, o encontrar info en el host para obtener la flag.
+- El módulo **sugiere explícitamente documentar los one-liners, scripts y notas** de cómo se encontró cada cosa — la idea es reforzar la metodología, no solo conseguir las flags.
+- Invita a buscar **múltiples formas de lograr el mismo output** (el mismo instinto de "varias vías para la misma info" de la sección 6).
+
+→ [Resolución del assessment](Skills%20Assessment.md)
+
+### Beyond this Module (Intro to Windows Command Line 23/23)
+
+#### Lo que ya sabía (repaso)
+- Las tareas de este módulo (acceso, enumeración, administración vía CLI) son tarea cotidiana de un junior pentester/sysadmin, con o sin supervisión.
+- Al final del skills assessment debería sentirse cómodo operando Windows **sin GUI**: las tareas administrativas por CLI agilizan el flujo y liberan tiempo para lo que necesita atención real.
+
+#### Lo que NO sabía / no tenía claro
+- **Rutas de continuación recomendadas por HTB:**
+  - **Setting Up** — configurar/automatizar hosts Windows propios.
+  - **Introduction to Active Directory** — AD es estándar en casi toda organización; como admin y pentester te lo vas a cruzar siempre.
+- **Práctica en la plataforma principal HTB:**
+  - **Intro to Red Team track** — 3 máquinas Windows fáciles para probar lo aprendido; aunque no se resuelvan solas, vale trabajarlas con walkthrough/video para sentir misconfigs y attack paths comunes.
+  - **Boxes sugeridas**: Blue, Support, Return.
+  - **Ippsec** — su sitio con búsqueda por tool/tema (ej. "powershell modules", "*.bat"), no solo videos.
+  - **Starting Point** — retos guiados para practicar "command-line kung fu" en escenarios con objetivo.
+- **Videos recomendados:**
+  - *APT's Love PowerShell, You Should Too* (DEFCON SafeMode) — cómo los adversarios usan PowerShell y qué defensas evaden.
+  - *PowerShell For Pentesting* (Mick Douglas, KringleCon 2018) — weaponizar tareas básicas de PowerShell.
+  - *PowerShell & Under The Wire* (John Hammond) — **UnderTheWire**: plataforma de práctica tipo wargame para PowerShell.
+- **Blogs/autores a seguir:** 0xdf (walkthroughs, aplicables a mundo real), Microsoft Training Docs (PowerShell a fondo), Black Hills Information Security (PowerShell/CMD/explotación), SANS blogs + webcast de PowerShell en pentesting.
+- Cierre del módulo: ser proficiente en CLIs de distintos OS es must para pentester/sysadmin; como atacante, importar módulos propios, aprovechar tools built-in, elevar privilegios, persistir y **living off the land** es la habilidad invaluable.
+
 
