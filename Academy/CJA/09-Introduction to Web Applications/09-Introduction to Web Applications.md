@@ -43,7 +43,7 @@ Después de todo, las aplicaciones web pueden ser accesibles desde cualquier par
 
 #### Atacando aplicaciones web
 
-A día de hoy es muy común ver que muchas compañías, sin importar su tamaño, manejan 1 o más aplicaciones web. Pueden ir desde aplicaciones simples para publicar anuncios o información manejadas por un `Content Management System` (CMS) como `WordPress`, hasta aplicaciones con funcionalidades complejas como inicios de sesión que soportan autenticación con distintos roles: desde usuarios básicos (privilegios mínimos) hasta usuarios con roles de administrador (privilegios máximos o superusuarios). Si bien a día de hoy no es tan común encontrar servicios o hosts expuestos directamente que puedan ser explotados por medio de `well known exploits` (técnicas o herramientas para explotar vulnerabilidades bien documentadas que generalmente ya se encuentran parchadas), a veces sucede.
+A día de hoy es muy común ver que muchas compañías, sin importar su tamaño, manejan 1 o más aplicaciones web. Pueden ir desde aplicaciones simples para p`**ublicar** anuncios o información manejadas por un `Content Management System` (CMS) como `WordPress`, hasta aplicaciones con funcionalidades complejas como inicios de sesión que soportan autenticación con distintos roles: desde usuarios básicos (privilegios mínimos) hasta usuarios con roles de administrador (privilegios máximos o superusuarios). Si bien a día de hoy no es tan común encontrar servicios o hosts expuestos directamente que puedan ser explotados por medio de `well known exploits` (técnicas o herramientas para explotar vulnerabilidades bien documentadas que generalmente ya se encuentran parchadas), a veces sucede.
 
 Las aplicaciones web representan una vasta superficie de ataque, y más por su naturaleza evolutiva y constante cambio, que si bien en ocasiones puede representar nuevas formas de protegerse o innovadoras funcionalidades, a veces introducen nuevos vectores de ataque que están ahí esperando que alguien los encuentre — preferiblemente un profesional de la ciberseguridad antes que un actor malicioso.
 
@@ -56,3 +56,26 @@ Algunos de los ejemplos de ataques más comunes en el mundo real son:
 | Unrestricted File Upload (Carga de archivos sin restricción) | Una app que permite subir una foto de perfil acepta cualquier tipo de archivo (no solo imágenes) → se sube código malicioso → control total del servidor de la aplicación web. |
 | IDOR (Insecure Direct Object Referencing) | Combinado con broken access control: editás tu perfil yendo a `/user/701/edit-profile`; si cambiás el 701 por 702, podés editar el perfil de otro usuario. |
 | Broken Access Control (Control de acceso roto) | Al registrar un usuario, el POST manda `username=bjones&password=Welcome1&email=...&roleid=3`. Si manipulás el parámetro `roleid` y lo cambiás a 0 o 1, podés registrar un usuario administrador y acceder a funciones no previstas de la app. |
+
+### Diseño de aplicacion Web (2/17)
+
+No hay 2 aplicaciones web que sean totalmente identicas, dado que los negocios crean aplicaciones web para distintos publicos y/o propositos lo que lleva a que esten diseñadas y programadas de formas distintas. Es muy importante entender como operan las aplicaciones web tras bambalinas, su estructura, como interactuan sus componentes y como se ajusta a la infraestructura de las organizaciones.
+
+Los diseños de aplicaciones web consisten en distintas capas las cuales podemos resumir en 3 grandes categorias:
+
+| Categoria | Descripcion |
+|----|----|
+| `Infraestructura de aplicaciones web` | Describe todo aquello que podemos llamar como estructura de componentes necesarios, como por ejemplo la base de datos, usada para que la aplicación web funcione como deberia.
+| `Componentes de aplicaciones web` | Representa todos los componentes con los que la aplicacion web interactua, los cuales podemos dividir en 3 areas de forma general: `UX/UI`, `Client` y  `server`. |
+| `Arquitectura de las aplicaciones web` | La arquitectura representa la relacion que existe entre los componentes de las aplicaciones web los cuales siguen ciertos patrones o formas de comportamiento para cumplir con el proposito requeridado para la aplicacion web. |
+
+#### Infraestructura de aplicaciones web
+
+Las aplicaciones web tienen muchas configuraciones de infraestructura las cuales tambien podemos llamar modelos, algunas de las mas comunes las podemos agrupar en estos 4 tipos:
+- `Cliente-Servidor`
+- `Un servidor`
+- `Muchos servidores - Una base de datos`
+- `Muchos servidores - Muchas bases de datos`
+
+##### Cliente-Servidor
+Es uno de los modelos mas comunes que existe, en este modelo o arquitectura las aplicaciones se dividen en 2 componentes uno es el `front-end` manejado por la parte del cliente(el navegador ej: chrome, edge, opera etc...) el cual maneja toda la parte visual o con lo que interactua el usuario y el `back-end` manejado por la parte del servidor, el cual se encarga de procesar toda la logica de la aplicacion web.
